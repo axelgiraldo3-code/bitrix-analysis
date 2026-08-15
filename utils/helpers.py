@@ -110,3 +110,31 @@ def classify_machine_type(title):
         return "Sistemas de soldadura automática"
     else:
         return "Otros / No especificado"
+
+
+def format_phone_ar(tel_digits):
+    """
+    Da formato visual argentino a un número de 10 dígitos ya limpio (sin 54/549):
+    "3496504147" -> "349 650-4147" (espacio tras el 3er dígito, guión tras el 6to).
+    Si no tiene exactamente 10 dígitos, se devuelve el valor original sin modificar,
+    para no inventar un formato sobre datos incompletos o mal capturados.
+    """
+    digits = re.sub(r"\D", "", str(tel_digits or ""))
+    if len(digits) != 10:
+        return str(tel_digits or "")
+    return f"{digits[0:3]} {digits[3:6]}-{digits[6:10]}"
+
+
+def hex_to_rgba(hex_color, alpha=0.08):
+    """
+    Convierte un color hexadecimal (ej. '#2ECC71') a una cadena rgba() con la
+    opacidad indicada. Se usa para pintar el fondo de una fila completa con muy
+    baja intensidad, sin competir con el color sólido de la celda de clasificación.
+    """
+    hex_color = str(hex_color).lstrip('#')
+    if len(hex_color) != 6:
+        return f"rgba(255, 255, 255, {alpha})"
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return f"rgba({r}, {g}, {b}, {alpha})"
