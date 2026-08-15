@@ -1,0 +1,22 @@
+# Credenciales y Secretos
+credentials.json
+.streamlit/secrets.toml
+*.json
+*.env
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Archivos de cache de Python
+__pycache__/
+*.pyc
+
+# Datos locales de la aplicacion (Cache CSV)
+data/*.csv
+!data/.gitkeep
+
+# Archivos de sistema operativo
+.DS_Store
+Thumbs.db
