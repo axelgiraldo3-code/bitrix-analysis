@@ -129,34 +129,39 @@ if spreadsheet_id and bitrix_webhook_url:
 
                     opciones_contactos = [generar_etiqueta_contacto(row) for _, row in df_mes.iterrows()]
 
-                    # --- Navegación de contactos (mantiene la posición entre reruns) ---
-                    nav_state_key = f"clasif_nav_idx_{mes_sel}"
-                    if nav_state_key not in st.session_state:
-                        st.session_state[nav_state_key] = 0
-                    # Si el mes cambió y hay menos contactos que antes, se acota el índice guardado
-                    st.session_state[nav_state_key] = max(0, min(st.session_state[nav_state_key], len(opciones_contactos) - 1))
+                    # --- Navegación de contactos ---
+                    # El selectbox se controla únicamente a través de su propio "key"
+                    # (selectbox_key). Streamlit ignora el parámetro `index` en los reruns
+                    # siguientes si el widget ya tiene un valor guardado bajo su `key`; por
+                    # eso los botones deben escribir directamente sobre st.session_state[selectbox_key]
+                    # (y no sobre una variable de estado separada) para poder moverlo.
+                    selectbox_key = f"clasif_selectbox_{mes_sel}"
 
                     contacto_seleccionado_str = st.selectbox(
                         "Seleccionar Contacto:",
                         options=opciones_contactos,
-                        index=st.session_state[nav_state_key],
-                        key=f"clasif_selectbox_{mes_sel}"
+                        key=selectbox_key
                     )
 
                     idx = opciones_contactos.index(contacto_seleccionado_str)
-                    st.session_state[nav_state_key] = idx
+
+                    def _ir_a_indice(nuevo_idx, _opciones=opciones_contactos, _key=selectbox_key):
+                        nuevo_idx = max(0, min(nuevo_idx, len(_opciones) - 1))
+                        st.session_state[_key] = _opciones[nuevo_idx]
 
                     col_prev, col_actual, col_next = st.columns(3)
                     with col_prev:
-                        if st.button("← Anterior", use_container_width=True, disabled=(idx <= 0), key=f"btn_prev_{mes_sel}"):
-                            st.session_state[nav_state_key] = max(0, idx - 1)
-                            st.rerun()
+                        st.button(
+                            "← Anterior", use_container_width=True, disabled=(idx <= 0),
+                            key=f"btn_prev_{mes_sel}", on_click=_ir_a_indice, args=(idx - 1,)
+                        )
                     with col_actual:
                         st.button("Actual", use_container_width=True, disabled=True, key=f"btn_actual_{mes_sel}")
                     with col_next:
-                        if st.button("Siguiente →", use_container_width=True, disabled=(idx >= len(opciones_contactos) - 1), key=f"btn_next_{mes_sel}"):
-                            st.session_state[nav_state_key] = min(len(opciones_contactos) - 1, idx + 1)
-                            st.rerun()
+                        st.button(
+                            "Siguiente →", use_container_width=True, disabled=(idx >= len(opciones_contactos) - 1),
+                            key=f"btn_next_{mes_sel}", on_click=_ir_a_indice, args=(idx + 1,)
+                        )
 
                     contacto = df_mes.iloc[idx]
 
@@ -222,7 +227,7 @@ if spreadsheet_id and bitrix_webhook_url:
                                     anteriores = df_mes.index[mask_pendientes].tolist()
                                     nuevo_idx = anteriores[0] if anteriores else idx
 
-                                st.session_state[nav_state_key] = nuevo_idx
+                                st.session_state[selectbox_key] = opciones_contactos[nuevo_idx]
                                 st.rerun()
                 else:
                     st.warning("No hay consultas registradas para el mes seleccionado.")
