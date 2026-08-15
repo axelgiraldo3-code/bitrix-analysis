@@ -13,9 +13,10 @@ env/
 __pycache__/
 *.pyc
 
-# Datos locales de la aplicacion (Cache CSV)
+# Datos locales de la aplicacion (Cache CSV, se regeneran al correr el script)
 data/*.csv
 !data/.gitkeep
+!data/clasificaciones_locales.csv
 
 # Archivos de sistema operativo
 .DS_Store
