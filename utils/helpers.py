@@ -138,3 +138,56 @@ def hex_to_rgba(hex_color, alpha=0.08):
     g = int(hex_color[2:4], 16)
     b = int(hex_color[4:6], 16)
     return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def format_phone_full(raw_tel):
+    """
+    Da formato a un teléfono tal cual llega de Bitrix24, que puede incluir un
+    prefijo de país/celular (54, 549, +54, etc.) antes del número local.
+    Los últimos 10 dígitos se formatean como número argentino ("232 469-8806");
+    lo que quede antes de esos 10 dígitos (el prefijo) se deja pegado sin
+    modificar, respetando el "+" inicial si estaba presente.
+    Si hay menos de 10 dígitos en total, se devuelve el valor original.
+    """
+    raw = str(raw_tel or "").strip()
+    if not raw:
+        return raw
+
+    tiene_mas = raw.startswith("+")
+    digits = re.sub(r"\D", "", raw)
+
+    if len(digits) < 10:
+        return raw
+
+    prefijo = digits[:-10]
+    ultimos10 = digits[-10:]
+    numero_formateado = f"{ultimos10[0:3]} {ultimos10[3:6]}-{ultimos10[6:10]}"
+
+    if prefijo:
+        signo = "+" if tiene_mas else ""
+        return f"{signo}{prefijo} {numero_formateado}"
+    return numero_formateado
+
+
+MESES_ES = {
+    1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
+    7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+}
+
+
+def format_mes_legible(anio_mes):
+    """
+    Convierte un período "AAAA-MM" (formato interno de AñoMes) en un texto legible
+    en español, ej. "2026-07" -> "Julio 2026". Si el valor no tiene ese formato
+    (por ejemplo "Sin Fecha"), se devuelve tal cual para no romper la UI.
+    """
+    texto = str(anio_mes or "").strip()
+    partes = texto.split("-")
+    if len(partes) != 2:
+        return texto
+    anio, mes = partes
+    try:
+        nombre_mes = MESES_ES[int(mes)]
+    except (ValueError, KeyError):
+        return texto
+    return f"{nombre_mes} {anio}"
