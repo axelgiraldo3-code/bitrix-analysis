@@ -358,8 +358,13 @@ def get_data_with_local_cache(sheet_id, sheet_name, webhook_url, force_refresh=F
         df_bitrix = pd.read_csv(CACHE_BITRIX_FILE)
 
         if "FechaHora" in df_sheets.columns:
-            df_sheets["FechaHora"] = pd.to_datetime(df_sheets["FechaHora"], errors="coerce")
+            # dayfirst=True es defensivo: si el CSV cacheado quedó con strings en
+            # formato DD/MM/AAAA (por una versión vieja de google_sheets.py que no
+            # ponía dayfirst), esto los re-parsea correctamente. No afecta a fechas
+            # ISO ya bien serializadas.
+            df_sheets["FechaHora"] = pd.to_datetime(df_sheets["FechaHora"], errors="coerce", dayfirst=True)
         if "DATE_CREATE" in df_bitrix.columns:
+            # Bitrix devuelve siempre ISO con timezone, no necesita dayfirst.
             df_bitrix["DATE_CREATE"] = pd.to_datetime(df_bitrix["DATE_CREATE"], errors="coerce")
 
         return df_sheets, df_bitrix

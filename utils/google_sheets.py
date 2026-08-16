@@ -106,7 +106,12 @@ def load_google_sheets_data(sheet_id, sheet_name):
         for col in df.columns:
             df[col] = df[col].apply(sanitize_text)
 
-        df["FechaHora"] = pd.to_datetime(df["FechaHora"], errors="coerce")
+        # dayfirst=True porque el bot escribe fechas en formato DD/MM/AAAA (locale
+        # español de Google Sheets). Sin este flag, pandas defaultea a MM/DD/AAAA y
+        # una fecha como "12/08/2026" (12 de agosto) se lee como "8 de diciembre"
+        # -> aparece en el desplegable como AñoMes 2026-12 (mes futuro inexistente).
+        # dayfirst NO rompe fechas ISO (2026-08-15): pandas las reconoce igual.
+        df["FechaHora"] = pd.to_datetime(df["FechaHora"], errors="coerce", dayfirst=True)
         df["AñoMes"] = df["FechaHora"].dt.strftime("%Y-%m").fillna("Sin Fecha")
 
         if "Enlace de Whatsapp" in df.columns:
