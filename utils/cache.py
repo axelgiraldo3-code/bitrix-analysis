@@ -191,6 +191,12 @@ def apply_automatic_classifications(df_sheets, df_bitrix):
                 continue
 
             fecha_b = pd.to_datetime(row_b.get("DATE_CREATE"), errors="coerce")
+            # Bitrix devuelve fechas con timezone (+03:00). Al comparar por período
+            # mensual más abajo con to_period('M'), pandas warnearía "Converting
+            # to Period representation will drop timezone information". Strippeamos
+            # la tz explícitamente acá para evitar ese warning en cada iteración.
+            if pd.notna(fecha_b) and getattr(fecha_b, "tz", None) is not None:
+                fecha_b = fecha_b.tz_convert(None)
             nombre_b = str(row_b.get("Nombre_Contacto", "")).strip()
 
             # Limpiar valores genéricos o sin datos válidos

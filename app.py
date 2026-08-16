@@ -195,14 +195,14 @@ if spreadsheet_id and bitrix_webhook_url:
                     col_prev, col_actual, col_next = st.columns(3)
                     with col_prev:
                         st.button(
-                            "← Anterior", use_container_width=True, disabled=(idx <= 0),
+                            "← Anterior", width="stretch", disabled=(idx <= 0),
                             key=f"btn_prev_{mes_sel}", on_click=_ir_a_indice, args=(idx - 1,)
                         )
                     with col_actual:
-                        st.button("Actual", use_container_width=True, disabled=True, key=f"btn_actual_{mes_sel}")
+                        st.button("Actual", width="stretch", disabled=True, key=f"btn_actual_{mes_sel}")
                     with col_next:
                         st.button(
-                            "Siguiente →", use_container_width=True, disabled=(idx >= len(opciones_contactos) - 1),
+                            "Siguiente →", width="stretch", disabled=(idx >= len(opciones_contactos) - 1),
                             key=f"btn_next_{mes_sel}", on_click=_ir_a_indice, args=(idx + 1,)
                         )
 
@@ -312,7 +312,7 @@ if spreadsheet_id and bitrix_webhook_url:
                 col_chart, col_compare = st.columns([2, 1])
 
                 with col_chart:
-                    st.plotly_chart(fig_pie, use_container_width=True)
+                    st.plotly_chart(fig_pie, width="stretch")
 
                 with col_compare:
                     st.markdown("**Comparativa vs. mes anterior**")
@@ -339,7 +339,7 @@ if spreadsheet_id and bitrix_webhook_url:
 
                         st.dataframe(
                             tabla_comparativa[["Clasificación", "Mes pasado", "Diferencia"]],
-                            use_container_width=True,
+                            width="stretch",
                             hide_index=True
                         )
                     else:
@@ -378,7 +378,7 @@ if spreadsheet_id and bitrix_webhook_url:
 
                 df_styled = df_display.style.apply(estilo_fila, axis=1)
 
-                st.dataframe(df_styled, use_container_width=True, hide_index=True)
+                st.dataframe(df_styled, width="stretch", hide_index=True)
 
                 col_csv, _ = st.columns(2)
                 csv_bytes = df_reporte.to_csv(index=False, encoding="utf-8-sig").encode('utf-8-sig')
@@ -428,7 +428,7 @@ if spreadsheet_id and bitrix_webhook_url:
                             legend_title_text="Etapa del Pipeline"
                         )
 
-                        st.plotly_chart(fig_bitrix, use_container_width=True)
+                        st.plotly_chart(fig_bitrix, width="stretch")
 
                         st.subheader("Lista de negociaciones")
 
@@ -456,7 +456,7 @@ if spreadsheet_id and bitrix_webhook_url:
 
                         df_bitrix_styled = df_bitrix_display.style.apply(estilo_fila_bitrix, axis=1)
 
-                        st.dataframe(df_bitrix_styled, use_container_width=True, hide_index=True)
+                        st.dataframe(df_bitrix_styled, width="stretch", hide_index=True)
 
                         csv_bitrix = df_bitrix_display.to_csv(index=False, encoding="utf-8-sig").encode('utf-8-sig')
                         st.download_button(
