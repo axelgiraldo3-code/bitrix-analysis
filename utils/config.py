@@ -22,10 +22,29 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 # repositorio donde solo se versiona data/.gitkeep).
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Archivos locales para almacenamiento y caché, todos dentro de data/
-LOCAL_CLASSIFICATIONS_FILE = os.path.join(DATA_DIR, "clasificaciones_locales.csv")
+# Caché local de las fuentes (bot y Bitrix). Estos CSV se regeneran solos y
+# NO deben versionarse en git — ver .gitignore.
 CACHE_SHEETS_FILE = os.path.join(DATA_DIR, "consultas_bot.csv")
 CACHE_BITRIX_FILE = os.path.join(DATA_DIR, "negocios_bitrix.csv")
+
+# Archivo LEGADO de clasificaciones manuales (pre-migración a Google Sheets).
+# Se mantiene la constante para que el script scripts/migrate_classifications.py
+# pueda leerlo. La app ya no lo lee ni lo escribe.
+LEGACY_CLASSIFICATIONS_FILE = os.path.join(DATA_DIR, "clasificaciones_locales.csv")
+
+# ---------------------------------------------------------
+# PESTAÑA DE CLASIFICACIONES EN GOOGLE SHEETS
+# ---------------------------------------------------------
+# Pestaña dedicada dentro de la misma spreadsheet del bot, donde persiste el
+# trabajo manual de clasificación. Se creó una única vez a mano; la app
+# asume que existe y tiene estos headers exactos en la primera fila.
+CLASSIFICATIONS_WORKSHEET = "Clasificaciones"
+CLASSIFICATIONS_HEADERS = [
+    "Enlace de Whatsapp",
+    "Clasificacion_Manual",
+    "Fecha_Ultima_Modificacion",
+    "Usuario",
+]
 
 # ---------------------------------------------------------
 # OPCIONES DE CLASIFICACIÓN MANUAL
