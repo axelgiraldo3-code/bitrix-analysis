@@ -4,10 +4,18 @@ import plotly.express as px
 import streamlit as st
 
 from utils.config import OPCIONES_CLASIFICACION, BITRIX_STAGE_COLORS, REPORT_COLOR_MAP
-from utils.helpers import normalizar_etapa, classify_machine_type, format_phone_ar, hex_to_rgba
+from utils.helpers import (
+    normalizar_etapa,
+    classify_machine_type,
+    format_phone_ar,
+    hex_to_rgba,
+    format_phone_full,
+    format_mes_legible,
+)
 from utils.cache import (
     get_data_with_local_cache,
     apply_automatic_classifications,
+    persist_automatic_classifications,
     get_saved_classifications,
     save_classification,
 )
@@ -29,9 +37,15 @@ st.title("Control de Consultas de WhatsApp y CRM Bitrix24")
 st.markdown(
     """
     <style>
+    /* Fuerza el color del texto en textareas deshabilitados (ej. "Resumen de
+       la consulta") a seguir el tema activo de Streamlit — negro en tema
+       claro, blanco en tema oscuro. Antes se forzaba #111 fijo, lo que
+       arreglaba el tema claro pero dejaba texto negro sobre fondo negro en
+       modo oscuro. --text-color es una CSS variable que Streamlit inyecta y
+       que refleja el tema activo, sin necesidad de detectarlo desde Python. */
     div[data-testid="stTextArea"] textarea:disabled {
-        color: #111111 !important;
-        -webkit-text-fill-color: #111111 !important;
+        color: var(--text-color) !important;
+        -webkit-text-fill-color: var(--text-color) !important;
         opacity: 1 !important;
     }
     </style>
@@ -86,8 +100,25 @@ if spreadsheet_id and bitrix_webhook_url:
         df_sheets = pd.merge(df_sheets, df_class, on="Enlace de Whatsapp", how="left")
         df_sheets["Clasificacion_Manual"] = df_sheets["Clasificacion_Manual"].fillna("Pendiente")
 
-        # Aplicar automatizaciones integradas
-        df_sheets = apply_automatic_classifications(df_sheets, df_bitrix)
+        # Aplicar automatizaciones integradas. Devuelve además la lista de
+        # clasificaciones que la función derivó automáticamente en esta corrida,
+        # para que las podamos persistir en la Sheet (columna Usuario = 'auto (...)').
+        # Así el registro de la Sheet refleja también las clasificaciones automáticas
+        # y no solo las manuales.
+        df_sheets, auto_cambios = apply_automatic_classifications(df_sheets, df_bitrix)
+
+        # Persistir en la Sheet solo lo que no esté ya registrado con el mismo valor.
+        # Esto es idempotente: en el primer arranque escribe todo lo acumulado, en
+        # los siguientes es no-op (0 escrituras).
+        try:
+            escritas = persist_automatic_classifications(auto_cambios, df_class)
+            if escritas:
+                st.toast(f"📝 {escritas} clasificación(es) automática(s) registrada(s) en la Sheet.", icon="⚡")
+        except Exception as e:
+            # No queremos que un fallo de persistencia impida usar la app: se muestra
+            # el error en el sidebar y seguimos con las clasificaciones aplicadas
+            # solo en memoria (comportamiento anterior).
+            st.sidebar.warning(f"No se pudieron persistir las clasificaciones automáticas ({e}).")
 
         tab_clasif, tab_reporte_sheets, tab_bitrix = st.tabs([
             "Clasificación Manual (Contacto por Contacto)",
@@ -136,6 +167,18 @@ if spreadsheet_id and bitrix_webhook_url:
                     # eso los botones deben escribir directamente sobre st.session_state[selectbox_key]
                     # (y no sobre una variable de estado separada) para poder moverlo.
                     selectbox_key = f"clasif_selectbox_{mes_sel}"
+                    pending_key = f"pending_{selectbox_key}"
+
+                    # Streamlit (a partir de ~1.30) prohíbe escribir a la key de un widget
+                    # DESPUÉS de que ese widget fue instanciado en el mismo rerun. Como el
+                    # auto-avance al guardar una clasificación (más abajo) necesita mover
+                    # el selectbox, no puede escribir directamente sobre `selectbox_key`
+                    # en ese momento: en su lugar deja la intención en `pending_key` y
+                    # llama a st.rerun(). Acá arriba, ANTES de instanciar el selectbox,
+                    # transferimos ese valor al key real. Los botones Anterior/Siguiente no
+                    # tienen este problema porque su on_click corre antes del render.
+                    if pending_key in st.session_state:
+                        st.session_state[selectbox_key] = st.session_state.pop(pending_key)
 
                     contacto_seleccionado_str = st.selectbox(
                         "Seleccionar Contacto:",
@@ -227,7 +270,11 @@ if spreadsheet_id and bitrix_webhook_url:
                                     anteriores = df_mes.index[mask_pendientes].tolist()
                                     nuevo_idx = anteriores[0] if anteriores else idx
 
-                                st.session_state[selectbox_key] = opciones_contactos[nuevo_idx]
+                                # Diferimos la escritura del selectbox al próximo rerun
+                                # (ver comentario extenso donde se define pending_key). Escribir
+                                # directamente sobre selectbox_key acá levanta StreamlitAPIException
+                                # porque el widget ya fue renderizado más arriba en este rerun.
+                                st.session_state[pending_key] = opciones_contactos[nuevo_idx]
                                 st.rerun()
                 else:
                     st.warning("No hay consultas registradas para el mes seleccionado.")
@@ -346,13 +393,14 @@ if spreadsheet_id and bitrix_webhook_url:
         # TAB 3: ANÁLISIS DE NEGOCIACIONES BITRIX24 (SALE)
         # =========================================================
         with tab_bitrix:
-            st.header("Análisis de Negociaciones Bitrix24 (Tipo: SALE)")
+            st.header("Análisis de ventas de máquinas")
 
             if not df_bitrix.empty:
                 meses_bitrix = sorted(df_bitrix["AñoMes"].dropna().unique(), reverse=True)
 
                 if meses_bitrix:
                     mes_sel_bitrix = st.selectbox("Seleccionar Mes (Bitrix24):", meses_bitrix, key="bitrix_mes_select")
+                    mes_bitrix_legible = format_mes_legible(mes_sel_bitrix)
                     df_bitrix_mes = df_bitrix[df_bitrix["AñoMes"] == mes_sel_bitrix].copy()
 
                     if not df_bitrix_mes.empty:
@@ -368,7 +416,7 @@ if spreadsheet_id and bitrix_webhook_url:
                             x="Tipo de máquina",
                             y="Cantidad",
                             color="Etapa",
-                            title=f"Negociaciones TYPE_ID = 'SALE' por Etapa ({mes_sel_bitrix})",
+                            title=f"Negociaciones por etapa - {mes_bitrix_legible}",
                             labels={"Etapa": "Etapa (Pipeline)", "Tipo de máquina": "Tipo de Máquina"},
                             barmode="group",
                             color_discrete_map=BITRIX_STAGE_COLORS
@@ -382,14 +430,35 @@ if spreadsheet_id and bitrix_webhook_url:
 
                         st.plotly_chart(fig_bitrix, use_container_width=True)
 
-                        st.subheader("Listado de Negociaciones Extraídas")
+                        st.subheader("Lista de negociaciones")
 
-                        cols_mostrar = ["TITLE", "TYPE_ID", "Etapa", "Datos del cliente", "Tipo de máquina"]
-                        cols_existentes = [c for c in cols_mostrar if c in df_bitrix_mes.columns]
+                        # La columna combinada "Datos del cliente" se separa en tres columnas
+                        # propias (Nombre, Compañía, Tel) para que cada dato sea filtrable/legible
+                        # por separado. El título del negocio (TITLE) se renombra a "Negociación"
+                        # para no chocar con el nombre del contacto.
+                        df_bitrix_display = pd.DataFrame({
+                            "Negociación": df_bitrix_mes["TITLE"],
+                            "Etapa": df_bitrix_mes["Etapa"],
+                            "Nombre": df_bitrix_mes["Nombre_Contacto"],
+                            "Compañía": df_bitrix_mes["Compania"],
+                            "Tel": df_bitrix_mes["Telefono"].apply(format_phone_full),
+                            "Tipo de máquina": df_bitrix_mes["Tipo de máquina"],
+                        })
 
-                        st.dataframe(df_bitrix_mes[cols_existentes].rename(columns={"TITLE": "Nombre"}), use_container_width=True)
+                        def estilo_fila_bitrix(row):
+                            """
+                            Colorea toda la fila según la etapa del negocio, a muy baja opacidad
+                            (8%), usando el mismo mapeo de colores que el gráfico de barras.
+                            """
+                            color = BITRIX_STAGE_COLORS.get(row["Etapa"], "#FFFFFF")
+                            fondo_suave = hex_to_rgba(color, 0.08)
+                            return [f"background-color: {fondo_suave};" for _ in row.index]
 
-                        csv_bitrix = df_bitrix_mes[cols_existentes].to_csv(index=False, encoding="utf-8-sig").encode('utf-8-sig')
+                        df_bitrix_styled = df_bitrix_display.style.apply(estilo_fila_bitrix, axis=1)
+
+                        st.dataframe(df_bitrix_styled, use_container_width=True, hide_index=True)
+
+                        csv_bitrix = df_bitrix_display.to_csv(index=False, encoding="utf-8-sig").encode('utf-8-sig')
                         st.download_button(
                             label="📥 Descargar Negociaciones Filtradas (CSV)",
                             data=csv_bitrix,
@@ -397,10 +466,10 @@ if spreadsheet_id and bitrix_webhook_url:
                             mime="text/csv"
                         )
                     else:
-                        st.warning(f"No se encontraron negociaciones con `TYPE_ID == 'SALE'` para el mes **{mes_sel_bitrix}**.")
+                        st.warning(f"No se encontraron negociaciones de venta para **{mes_bitrix_legible}**.")
                 else:
                     st.warning("No hay registros con fechas válidas en los datos cargados de Bitrix24.")
             else:
-                st.warning("No se obtuvieron datos de Bitrix24. Revisa la URL del Webhook o confirma que existan negociaciones con `TYPE_ID == 'SALE'`.")
+                st.warning("No se obtuvieron datos de Bitrix24. Revisa la URL del Webhook o confirma que existan negociaciones de venta cargadas.")
 else:
     st.info("👈 Por favor, ingresa el **Spreadsheet ID** y la **URL del Webhook de Bitrix24** en el panel izquierdo para comenzar.")
