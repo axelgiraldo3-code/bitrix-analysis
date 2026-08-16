@@ -132,7 +132,15 @@ if spreadsheet_id and bitrix_webhook_url:
         with tab_clasif:
             st.header("Módulo de Clasificación Manual")
 
-            meses_disponibles = sorted(df_sheets["AñoMes"].dropna().unique(), reverse=True)
+            # Ordenamos los meses cronológicamente descendente y dejamos "Sin Fecha"
+            # al final (si aparece), para que no compita como opción por defecto con
+            # los meses reales. Un 'Sin Fecha' en el listado indica filas con la
+            # columna FechaHora vacía o mal formateada en la Sheet fuente.
+            meses_validos = sorted(
+                [m for m in df_sheets["AñoMes"].dropna().unique() if m != "Sin Fecha"],
+                reverse=True,
+            )
+            meses_disponibles = meses_validos + (["Sin Fecha"] if "Sin Fecha" in df_sheets["AñoMes"].dropna().unique() else [])
 
             if meses_disponibles:
                 mes_sel = st.selectbox("Filtrar por Mes:", meses_disponibles, key="clasif_mes_select")

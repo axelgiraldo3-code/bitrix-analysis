@@ -11,6 +11,55 @@ from google.oauth2.service_account import Credentials
 from .helpers import sanitize_text, clean_phone
 
 
+# Epoch de Google Sheets para serial numbers de fechas (mismo que Excel).
+# Un valor 45000.5 significa "45000 días y 12hs desde 1899-12-30".
+_SHEETS_EPOCH = pd.Timestamp("1899-12-30")
+
+
+def _parse_fecha_bot(val):
+    """
+    Parseo robusto de un valor de FechaHora que puede venir en varios formatos,
+    porque el bot y/o la configuración de la Sheet fueron cambiando en el tiempo:
+
+    - Serial number de Sheets (int/float, ej. 45876.65): fecha nativa de Sheets;
+      se convierte contra el epoch 1899-12-30 (idéntico a Excel).
+    - String ISO 'YYYY-MM-DD [HH:MM:SS]': se parsea directo, sin ambigüedad.
+    - String DD/MM/YYYY o DD-MM-YYYY [HH:MM:SS]: formato locale español (Argentina);
+      se parsea con dayfirst=True. NUNCA se intenta MM/DD porque, ante ambigüedad,
+      esa interpretación produciría meses futuros inválidos (bug histórico).
+    - Cualquier otra cosa: pd.NaT (fila queda como "Sin Fecha").
+
+    Este parseo blindado reemplaza al pd.to_datetime() plano anterior, que fallaba
+    con configuraciones mixtas de la Sheet y producía tanto NaT silenciosos como
+    fechas invertidas (mes/día).
+    """
+    # Serial number nativo de Sheets (llega solo cuando pedimos UNFORMATTED_VALUE)
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        # Sheets pone las fechas como número de días desde 1899-12-30.
+        # El float con decimales representa la fracción del día (hora).
+        try:
+            return _SHEETS_EPOCH + pd.Timedelta(days=float(val))
+        except (ValueError, OverflowError):
+            return pd.NaT
+
+    # String u otro
+    if val is None:
+        return pd.NaT
+    s = str(val).strip()
+    if not s:
+        return pd.NaT
+
+    # Intento 1: ISO YYYY-MM-DD (unambiguo, no necesita dayfirst)
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        parsed = pd.to_datetime(s, errors="coerce")
+        if pd.notna(parsed):
+            return parsed
+
+    # Intento 2: DD/MM/YYYY o DD-MM-YYYY (locale español)
+    parsed = pd.to_datetime(s, errors="coerce", dayfirst=True)
+    return parsed  # NaT si tampoco encaja
+
+
 def deduplicate_bot_queries(df):
     """
     Deduplica las consultas del bot según las siguientes reglas:
@@ -64,10 +113,24 @@ def load_google_sheets_data(sheet_id, sheet_name):
         else:
             sheet = client.open(sheet_id).worksheet(sheet_name)
 
-        raw_values = sheet.get_all_values()
+        # Pedimos los valores SIN FORMATEAR (UNFORMATTED_VALUE): las fechas llegan
+        # como serial numbers (float), no como strings que dependen de la locale
+        # del display. Esto elimina de raiz la ambiguedad DD/MM vs MM/DD que
+        # generaba meses futuros en el desplegable. Si el fetch con esta opción
+        # falla (versión vieja de gspread), caemos al get_all_values() clásico y
+        # confiamos en _parse_fecha_bot() para desambiguar los strings.
+        try:
+            raw_values = sheet.get_all_values(value_render_option="UNFORMATTED_VALUE")
+        except TypeError:
+            raw_values = sheet.get_all_values()
 
-        if not raw_values:
+        if not raw_values or len(raw_values) < 2:
             return pd.DataFrame()
+
+        # La primera fila que devuelve la Sheet es el header (nombres de columnas).
+        # Antes se metía como una fila de datos con FechaHora="FechaHora", lo que
+        # producía un contacto fantasma con "Sin Fecha" en el desplegable.
+        raw_values = raw_values[1:]
 
         column_names = [
             "FechaHora",
@@ -103,15 +166,18 @@ def load_google_sheets_data(sheet_id, sheet_name):
 
         df["Resumen de la consulta"] = df.apply(unir_resumenes, axis=1)
 
+        # Parsear FechaHora ANTES de aplicar sanitize_text a todas las columnas.
+        # sanitize_text convierte todo a str, lo que perdería el serial number
+        # nativo de Sheets si viniera como float. Aplicamos el parser robusto
+        # directamente sobre el valor crudo.
+        df["FechaHora"] = df["FechaHora"].apply(_parse_fecha_bot)
+
+        # Ahora sí, sanitizar todas las demás columnas (texto)
         for col in df.columns:
+            if col == "FechaHora":
+                continue
             df[col] = df[col].apply(sanitize_text)
 
-        # dayfirst=True porque el bot escribe fechas en formato DD/MM/AAAA (locale
-        # español de Google Sheets). Sin este flag, pandas defaultea a MM/DD/AAAA y
-        # una fecha como "12/08/2026" (12 de agosto) se lee como "8 de diciembre"
-        # -> aparece en el desplegable como AñoMes 2026-12 (mes futuro inexistente).
-        # dayfirst NO rompe fechas ISO (2026-08-15): pandas las reconoce igual.
-        df["FechaHora"] = pd.to_datetime(df["FechaHora"], errors="coerce", dayfirst=True)
         df["AñoMes"] = df["FechaHora"].dt.strftime("%Y-%m").fillna("Sin Fecha")
 
         if "Enlace de Whatsapp" in df.columns:
