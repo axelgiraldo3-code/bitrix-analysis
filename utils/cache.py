@@ -369,9 +369,19 @@ def get_data_with_local_cache(sheet_id, sheet_name, webhook_url, force_refresh=F
             # ponía dayfirst), esto los re-parsea correctamente. No afecta a fechas
             # ISO ya bien serializadas.
             df_sheets["FechaHora"] = pd.to_datetime(df_sheets["FechaHora"], errors="coerce", dayfirst=True)
+            # CRÍTICO: recalcular AñoMes desde la FechaHora recién parseada. Sin
+            # esto, si el CSV fue escrito por una versión vieja que producía
+            # AñoMes incorrecto (ej. "2026-12" para una fecha que en realidad es
+            # 12/agosto), el valor viejo sobrevive aunque FechaHora se corrija.
+            # Esto se manifestaba como filas con FechaHora=Aug 12 apareciendo bajo
+            # el filtro AñoMes=2026-12 en el desplegable de meses.
+            df_sheets["AñoMes"] = df_sheets["FechaHora"].dt.strftime("%Y-%m").fillna("Sin Fecha")
         if "DATE_CREATE" in df_bitrix.columns:
             # Bitrix devuelve siempre ISO con timezone, no necesita dayfirst.
             df_bitrix["DATE_CREATE"] = pd.to_datetime(df_bitrix["DATE_CREATE"], errors="coerce")
+            if "AñoMes" in df_bitrix.columns:
+                # Mismo argumento que arriba, por consistencia.
+                df_bitrix["AñoMes"] = df_bitrix["DATE_CREATE"].dt.strftime("%Y-%m").fillna("Sin Fecha")
 
         return df_sheets, df_bitrix
     else:
