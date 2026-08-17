@@ -373,37 +373,103 @@ if spreadsheet_id and bitrix_webhook_url:
                 st.subheader("Tabla de Datos con Clasificación Agregada")
 
                 # -------------------------------------------------------
-                # CSS scopeado: pinta los botones "Negocio en Bitrix (+/−)"
-                # de verde y estiliza el bloque del historial expandido.
-                # Los selectores usan la convención `st-key-<key>` que
-                # Streamlit expone en el DOM cuando un contenedor recibe
-                # `key=`, así el CSS no afecta a otros widgets de la app.
+                # CSS scopeado a la tabla del Tab 2. Objetivo: que la tabla
+                # armada con st.columns luzca como una tabla real, con
+                # bordes colapsados y sin gutter entre columnas ni entre
+                # filas — imitando la estética del st.dataframe original.
+                # Toda la tabla se envuelve en `st-key-tabla_reporte`;
+                # el encabezado en `st-key-tab2_header`; cada fila en
+                # `st-key-fila_reporte_...`. Los selectores son scopeados
+                # para no afectar al resto de la app.
                 # -------------------------------------------------------
                 st.markdown(
                     """
                     <style>
-                    /* Botón "Negocio en Bitrix (+/−)" en verde Bitrix. Se pinta
-                       vía CSS scopeado a la clase `st-key-bitrix_btn_...` que
-                       Streamlit expone en el DOM cuando un st.container recibe
-                       `key=`, para no afectar otros botones de la app. */
+                    /* --- Colapsar gutter y padding de columnas/filas --- */
+                    /* Sin gap horizontal entre columnas de header y filas */
+                    [class*="st-key-tabla_reporte"] [data-testid="stHorizontalBlock"] {
+                        gap: 0 !important;
+                    }
+                    /* Sin padding en cada columna */
+                    [class*="st-key-tabla_reporte"] [data-testid="stColumn"] {
+                        padding: 0 !important;
+                    }
+                    /* Sin espacio vertical entre bloques dentro de una columna */
+                    [class*="st-key-tabla_reporte"] [data-testid="stColumn"]
+                        > div[data-testid="stVerticalBlock"] {
+                        gap: 0 !important;
+                    }
+                    /* Sin margen entre filas consecutivas (contenedor de fila) */
+                    [class*="st-key-fila_reporte_"] {
+                        margin: 0 !important;
+                    }
+                    [class*="st-key-fila_reporte_"] [data-testid="stVerticalBlock"] {
+                        gap: 0 !important;
+                    }
+                    /* Los elementos hijos de element-container heredan un
+                       padding-bottom por default; lo anulamos para que las
+                       celdas queden pegadas verticalmente. */
+                    [class*="st-key-tabla_reporte"] [data-testid="stElementContainer"],
+                    [class*="st-key-tabla_reporte"] [data-testid="element-container"] {
+                        margin: 0 !important;
+                        padding: 0 !important;
+                    }
+
+                    /* --- Celdas de la tabla (bordes colapsados) --- */
+                    .celda-t2 {
+                        padding: 8px 10px !important;
+                        border-top: 1px solid rgba(150,150,150,0.28);
+                        border-right: 1px solid rgba(150,150,150,0.28);
+                        margin: 0 !important;
+                        min-height: 40px;
+                        display: flex;
+                        align-items: center;
+                        box-sizing: border-box;
+                    }
+                    /* La primera columna suma border-left, la última suma
+                       border-bottom en el último renglón (se maneja abajo). */
+                    [class*="st-key-fila_reporte_"] [data-testid="stColumn"]:first-child .celda-t2,
+                    [class*="st-key-tab2_header"] [data-testid="stColumn"]:first-child .celda-t2 {
+                        border-left: 1px solid rgba(150,150,150,0.28);
+                    }
+                    /* Chip fuerte de clasificación: sin margen, ocupa la celda */
+                    .celda-t2 .chip-clasif {
+                        width: 100%;
+                        text-align: center;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        font-weight: 700;
+                    }
+
+                    /* --- Botón "Negocio en Bitrix (+/−)" en verde Bitrix --- */
+                    [class*="st-key-bitrix_btn_"] {
+                        padding: 0 !important;
+                        margin: 0 !important;
+                    }
+                    [class*="st-key-bitrix_btn_"] div[data-testid="stButton"] {
+                        margin: 0 !important;
+                        padding: 0 !important;
+                    }
                     [class*="st-key-bitrix_btn_"] button {
                         background-color: #22C55E !important;
                         color: #FFFFFF !important;
                         border: 1px solid #16A34A !important;
+                        border-radius: 0 !important;
                         font-weight: 600 !important;
+                        margin: 0 !important;
+                        min-height: 40px;
+                        height: 40px;
+                        width: 100%;
                     }
                     [class*="st-key-bitrix_btn_"] button:hover {
                         background-color: #16A34A !important;
                         border-color: #15803D !important;
                         color: #FFFFFF !important;
                     }
-                    /* Historial expandido: NO usar margin-top negativo (causaba
-                       que la mini-tabla se superpusiera con la fila del
-                       contacto). Se distingue visualmente con una barra verde
-                       a la izquierda que la ata a la fila padre y un margen
-                       inferior mayor que separa del siguiente contacto. */
+
+                    /* --- Historial expandido: full-width con borde verde --- */
                     [class*="st-key-bitrix_hist_"] {
-                        margin: 4px 0 14px 0 !important;
+                        margin: 6px 0 14px 0 !important;
                         padding-left: 12px !important;
                         border-left: 3px solid #22C55E !important;
                     }
@@ -468,131 +534,133 @@ if spreadsheet_id and bitrix_webhook_url:
                 # Cuando el contacto tiene al menos un negocio en Bitrix, la
                 # celda de Clasificación se reemplaza por un botón
                 # "Negocio en Bitrix (+)" que despliega debajo la tabla de
-                # negocios históricos en el formato
-                # [Negociación | Nombre | Compañía | Etapa | Teléfono].
+                # negocios históricos [Negociación | Nombre | Compañía |
+                # Etapa | Teléfono].
                 # -------------------------------------------------------
                 COL_WIDTHS = [1.1, 2.0, 1.8, 2.2, 2.6]
                 CLASIF_TEXTO_BLANCO = {"Spam/Servicios", "Derivado al área técnica", "Consulta incompatible"}
 
-                # Encabezado
-                hdr_cols = st.columns(COL_WIDTHS, gap="small")
-                for hc, titulo in zip(
-                    hdr_cols,
-                    ["Fecha", "Nombre", "Numero", "Área de interés", "Clasificación"],
-                ):
-                    hc.markdown(f"**{titulo}**")
-                st.markdown(
-                    "<hr style='margin:2px 0 8px 0;border:none;border-top:1px solid #ddd;'/>",
-                    unsafe_allow_html=True,
-                )
-
-                df_reporte_iter = df_reporte.reset_index(drop=True)
-                for i, r in df_reporte_iter.iterrows():
-                    fecha_val = pd.to_datetime(r.get("FechaHora"), errors="coerce")
-                    fecha_str = fecha_val.strftime("%d-%m-%y") if pd.notna(fecha_val) else "—"
-                    nombre_val = _mostrar(r.get("Nombre"))
-                    tel_raw = str(r.get("Telefono_Limpio", "") or "").strip()
-                    if tel_raw.lower() in ("nan", "none"):
-                        tel_raw = ""
-                    tel_display = format_phone_ar(tel_raw) if tel_raw else "—"
-                    area_val = _mostrar(r.get("Área de interés"))
-                    clasif_val = _mostrar(r.get("Clasificacion_Manual"), default="Pendiente")
-
-                    historial = _buscar_historial_bitrix(tel_raw, r.get("Nombre"))
-                    tiene_bitrix = not historial.empty
-
-                    # Pintado suave de la fila con el color de la clasificación
-                    color_clasif = REPORT_COLOR_MAP.get(clasif_val, "#FFFFFF")
-                    fondo_suave = hex_to_rgba(color_clasif, 0.08)
-                    texto_fuerte = "#FFFFFF" if clasif_val in CLASIF_TEXTO_BLANCO else "#000000"
-
-                    with st.container(key=f"fila_reporte_{mes_reporte}_{i}"):
-                        row_cols = st.columns(COL_WIDTHS, gap="small")
-
-                        celda_texto = (
-                            "padding:6px 8px;border-radius:4px;"
-                            f"background-color:{fondo_suave};"
-                        )
-                        row_cols[0].markdown(
-                            f"<div style='{celda_texto}'>{fecha_str}</div>",
-                            unsafe_allow_html=True,
-                        )
-                        row_cols[1].markdown(
-                            f"<div style='{celda_texto}'>{nombre_val}</div>",
-                            unsafe_allow_html=True,
-                        )
-                        row_cols[2].markdown(
-                            f"<div style='{celda_texto}'>{tel_display}</div>",
-                            unsafe_allow_html=True,
-                        )
-                        row_cols[3].markdown(
-                            f"<div style='{celda_texto}'>{area_val}</div>",
-                            unsafe_allow_html=True,
-                        )
-
-                        expand_key = f"expand_bitrix_{mes_reporte}_{i}"
-                        if tiene_bitrix:
-                            expandido = st.session_state.get(expand_key, False)
-                            label_btn = (
-                                "Negocio en Bitrix (−)" if expandido else "Negocio en Bitrix (+)"
+                # Toda la tabla vive dentro de este contenedor para que el
+                # CSS scopeado (`st-key-tabla_reporte`) alcance a header y
+                # filas por igual.
+                with st.container(key="tabla_reporte"):
+                    # Encabezado
+                    with st.container(key="tab2_header"):
+                        hdr_cols = st.columns(COL_WIDTHS, gap="small")
+                        for hc, titulo in zip(
+                            hdr_cols,
+                            ["Fecha", "Nombre", "Numero", "Área de interés", "Clasificación"],
+                        ):
+                            hc.markdown(
+                                f"<div class='celda-t2' style='font-weight:700;"
+                                f"background-color:rgba(150,150,150,0.08);'>{titulo}</div>",
+                                unsafe_allow_html=True,
                             )
-                            # El botón se envuelve en un st.container con key,
-                            # que Streamlit expone como class="st-key-bitrix_btn_..."
-                            # en el DOM. El CSS scopeado del principio lo pinta
-                            # de verde sin afectar al resto de botones de la app.
-                            with row_cols[4]:
-                                with st.container(
-                                    key=f"bitrix_btn_{mes_reporte}_{i}"
-                                ):
-                                    if st.button(
-                                        label_btn,
-                                        key=f"btn_bitrix_{mes_reporte}_{i}",
-                                        width="stretch",
+
+                    df_reporte_iter = df_reporte.reset_index(drop=True)
+                    for i, r in df_reporte_iter.iterrows():
+                        fecha_val = pd.to_datetime(r.get("FechaHora"), errors="coerce")
+                        fecha_str = fecha_val.strftime("%d-%m-%y") if pd.notna(fecha_val) else "—"
+                        nombre_val = _mostrar(r.get("Nombre"))
+                        tel_raw = str(r.get("Telefono_Limpio", "") or "").strip()
+                        if tel_raw.lower() in ("nan", "none"):
+                            tel_raw = ""
+                        tel_display = format_phone_ar(tel_raw) if tel_raw else "—"
+                        area_val = _mostrar(r.get("Área de interés"))
+                        clasif_val = _mostrar(r.get("Clasificacion_Manual"), default="Pendiente")
+
+                        historial = _buscar_historial_bitrix(tel_raw, r.get("Nombre"))
+                        tiene_bitrix = not historial.empty
+
+                        # Pintado suave de la fila con el color de la clasificación
+                        color_clasif = REPORT_COLOR_MAP.get(clasif_val, "#FFFFFF")
+                        fondo_suave = hex_to_rgba(color_clasif, 0.08)
+                        texto_fuerte = "#FFFFFF" if clasif_val in CLASIF_TEXTO_BLANCO else "#000000"
+
+                        with st.container(key=f"fila_reporte_{mes_reporte}_{i}"):
+                            row_cols = st.columns(COL_WIDTHS, gap="small")
+
+                            celda_bg = f"background-color:{fondo_suave};"
+                            row_cols[0].markdown(
+                                f"<div class='celda-t2' style='{celda_bg}'>{fecha_str}</div>",
+                                unsafe_allow_html=True,
+                            )
+                            row_cols[1].markdown(
+                                f"<div class='celda-t2' style='{celda_bg}'>{nombre_val}</div>",
+                                unsafe_allow_html=True,
+                            )
+                            row_cols[2].markdown(
+                                f"<div class='celda-t2' style='{celda_bg}'>{tel_display}</div>",
+                                unsafe_allow_html=True,
+                            )
+                            row_cols[3].markdown(
+                                f"<div class='celda-t2' style='{celda_bg}'>{area_val}</div>",
+                                unsafe_allow_html=True,
+                            )
+
+                            expand_key = f"expand_bitrix_{mes_reporte}_{i}"
+                            if tiene_bitrix:
+                                expandido = st.session_state.get(expand_key, False)
+                                label_btn = (
+                                    "Negocio en Bitrix (−)" if expandido else "Negocio en Bitrix (+)"
+                                )
+                                # Botón real de Streamlit, pintado en verde
+                                # por CSS scopeado (st-key-bitrix_btn_...).
+                                # Se aloja directo en la celda (sin div extra)
+                                # para que ocupe todo el alto/ancho y quede
+                                # alineado con los bordes de la tabla.
+                                with row_cols[4]:
+                                    with st.container(
+                                        key=f"bitrix_btn_{mes_reporte}_{i}"
                                     ):
-                                        st.session_state[expand_key] = not expandido
-                                        expandido = not expandido
-                        else:
-                            row_cols[4].markdown(
-                                f"<div style='background-color:{color_clasif};color:{texto_fuerte};"
-                                f"font-weight:bold;padding:6px 10px;border-radius:6px;"
-                                f"text-align:center'>{clasif_val}</div>",
-                                unsafe_allow_html=True,
-                            )
-                            expandido = False
+                                        if st.button(
+                                            label_btn,
+                                            key=f"btn_bitrix_{mes_reporte}_{i}",
+                                            width="stretch",
+                                        ):
+                                            st.session_state[expand_key] = not expandido
+                                            expandido = not expandido
+                            else:
+                                row_cols[4].markdown(
+                                    f"<div class='celda-t2' style='padding:0 !important;'>"
+                                    f"<div class='chip-clasif' style='background-color:{color_clasif};"
+                                    f"color:{texto_fuerte};'>{clasif_val}</div></div>",
+                                    unsafe_allow_html=True,
+                                )
+                                expandido = False
 
-                    if tiene_bitrix and expandido:
-                        # El historial se renderiza a ancho completo, debajo
-                        # de la fila del contacto. Se distingue visualmente
-                        # con una barra verde a la izquierda (CSS scopeado a
-                        # la clase `st-key-bitrix_hist_...`) para dejar claro
-                        # que es "hijo" de la fila anterior, sin necesidad de
-                        # jugar con márgenes negativos que causaban solapes.
-                        with st.container(key=f"bitrix_hist_{mes_reporte}_{i}"):
-                            st.markdown(
-                                f"<div style='font-size:0.82em;color:#6B7280;"
-                                f"margin-bottom:4px;'>📜 Historial del contacto "
-                                f"— <b>{len(historial)}</b> negocio(s) encontrados</div>",
-                                unsafe_allow_html=True,
-                            )
-                            df_hist_display = pd.DataFrame({
-                                "Negociación": historial["TITLE"].fillna("—").replace("", "—").values,
-                                "Nombre": historial["Nombre_Contacto"].fillna("—").replace("", "—").values,
-                                "Compañía": historial["Compania"].fillna("Sin Compañía").replace("", "Sin Compañía").values,
-                                "Etapa": historial["Etapa"].fillna("—").replace("", "—").values,
-                                "Teléfono": historial["Telefono"].apply(format_phone_full).values,
-                            })
+                        if tiene_bitrix and expandido:
+                            # El historial se renderiza a ancho completo,
+                            # debajo de la fila del contacto. Se distingue
+                            # visualmente con una barra verde a la izquierda
+                            # (CSS scopeado a la clase `st-key-bitrix_hist_...`)
+                            # para dejar claro que es "hijo" de la fila anterior.
+                            with st.container(key=f"bitrix_hist_{mes_reporte}_{i}"):
+                                st.markdown(
+                                    f"<div style='font-size:0.82em;color:#6B7280;"
+                                    f"margin-bottom:4px;'>📜 Historial del contacto "
+                                    f"— <b>{len(historial)}</b> negocio(s) encontrados</div>",
+                                    unsafe_allow_html=True,
+                                )
+                                df_hist_display = pd.DataFrame({
+                                    "Negociación": historial["TITLE"].fillna("—").replace("", "—").values,
+                                    "Nombre": historial["Nombre_Contacto"].fillna("—").replace("", "—").values,
+                                    "Compañía": historial["Compania"].fillna("Sin Compañía").replace("", "Sin Compañía").values,
+                                    "Etapa": historial["Etapa"].fillna("—").replace("", "—").values,
+                                    "Teléfono": historial["Telefono"].apply(format_phone_full).values,
+                                })
 
-                            def _estilo_hist(row):
-                                color = BITRIX_STAGE_COLORS.get(row["Etapa"], "#FFFFFF")
-                                fondo = hex_to_rgba(color, 0.10)
-                                return [f"background-color: {fondo};" for _ in row.index]
+                                def _estilo_hist(row):
+                                    color = BITRIX_STAGE_COLORS.get(row["Etapa"], "#FFFFFF")
+                                    fondo = hex_to_rgba(color, 0.10)
+                                    return [f"background-color: {fondo};" for _ in row.index]
 
-                            df_hist_styled = df_hist_display.style.apply(_estilo_hist, axis=1)
-                            st.dataframe(
-                                df_hist_styled,
-                                width="stretch",
-                                hide_index=True,
-                            )
+                                df_hist_styled = df_hist_display.style.apply(_estilo_hist, axis=1)
+                                st.dataframe(
+                                    df_hist_styled,
+                                    width="stretch",
+                                    hide_index=True,
+                                )
 
                 col_csv, _ = st.columns(2)
                 csv_bytes = df_reporte.to_csv(index=False, encoding="utf-8-sig").encode('utf-8-sig')
