@@ -312,8 +312,25 @@ if spreadsheet_id and bitrix_webhook_url:
                     color="Clasificación",
                     color_discrete_map=REPORT_COLOR_MAP
                 )
-                fig_pie.update_traces(textinfo="percent+label", textposition="outside")
-                fig_pie.update_layout(showlegend=True, margin=dict(t=30, b=30, l=10, r=10))
+                # `automargin=True` deja que Plotly reserve espacio para las
+                # etiquetas externas (percent+label) en vez de recortarlas o
+                # empujar las porciones del pie. `uniformtext_mode="hide"`
+                # oculta etiquetas que no entren en su porción en vez de
+                # deformarlas. Los márgenes generosos evitan que texto largo
+                # (ej. "Derivado al área técnica") choque contra el borde y
+                # provoque que el gráfico "se quiebre".
+                fig_pie.update_traces(
+                    textinfo="percent+label",
+                    textposition="outside",
+                    automargin=True,
+                )
+                fig_pie.update_layout(
+                    showlegend=True,
+                    margin=dict(t=80, b=80, l=100, r=100),
+                    height=500,
+                    uniformtext_minsize=10,
+                    uniformtext_mode="hide",
+                )
 
                 # En pantallas anchas el gráfico solo no llena la fila; se agrega al lado
                 # una tabla comparativa contra el mes anterior para aprovechar el espacio.
@@ -355,30 +372,30 @@ if spreadsheet_id and bitrix_webhook_url:
 
                 st.subheader("Tabla de Datos con Clasificación Agregada")
 
-                # Estructura fija de columnas solicitada: fecha corta, teléfono formateado,
-                # área de interés, nombre y clasificación manual, en ese orden.
+                # Estructura fija de columnas solicitada:
+                # [Fecha | Nombre | Numero | Área de interés | Clasificación].
                 df_display = pd.DataFrame({
                     "Fecha": pd.to_datetime(df_reporte["FechaHora"], errors="coerce").dt.strftime("%d-%m-%y"),
-                    "Numero limpio": df_reporte["Telefono_Limpio"].apply(format_phone_ar),
-                    "Área de interés": df_reporte["Área de interés"],
                     "Nombre": df_reporte["Nombre"],
-                    "Clasificacion Manual": df_reporte["Clasificacion_Manual"],
+                    "Numero": df_reporte["Telefono_Limpio"].apply(format_phone_ar),
+                    "Área de interés": df_reporte["Área de interés"],
+                    "Clasificación": df_reporte["Clasificacion_Manual"],
                 })
 
                 def estilo_fila(row):
                     """
                     Pinta toda la fila con el color de la clasificación a muy baja opacidad
                     (para identificar el grupo de un vistazo) y reserva el color sólido
-                    fuerte únicamente para la celda de "Clasificacion Manual".
+                    fuerte únicamente para la celda de "Clasificación".
                     """
-                    clasif = row["Clasificacion Manual"]
+                    clasif = row["Clasificación"]
                     color = REPORT_COLOR_MAP.get(clasif, "#FFFFFF")
                     fondo_suave = hex_to_rgba(color, 0.08)
                     texto_fuerte = "#FFFFFF" if clasif in ["Spam/Servicios", "Derivado al área técnica", "Consulta incompatible"] else "#000000"
 
                     estilos = []
                     for col in row.index:
-                        if col == "Clasificacion Manual":
+                        if col == "Clasificación":
                             estilos.append(f"background-color: {color}; color: {texto_fuerte}; font-weight: bold;")
                         else:
                             estilos.append(f"background-color: {fondo_suave};")
