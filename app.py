@@ -374,18 +374,18 @@ if spreadsheet_id and bitrix_webhook_url:
 
                 # -------------------------------------------------------
                 # CSS scopeado: pinta los botones "Negocio en Bitrix (+/−)"
-                # de verde (para que se lean como "acción disponible" y no
-                # se confundan con un botón neutro), y compacta el bloque
-                # del historial expandido para que quede pegado a su fila
-                # e indentado bajo la columna de Clasificación (sin dejar
-                # una franja vacía a la izquierda). Los selectores usan la
-                # convención `st-key-<key>` que Streamlit expone en el DOM
-                # cuando un contenedor recibe `key=`.
+                # de verde y estiliza el bloque del historial expandido.
+                # Los selectores usan la convención `st-key-<key>` que
+                # Streamlit expone en el DOM cuando un contenedor recibe
+                # `key=`, así el CSS no afecta a otros widgets de la app.
                 # -------------------------------------------------------
                 st.markdown(
                     """
                     <style>
-                    /* Botón "Negocio en Bitrix (+/−)" en verde Bitrix */
+                    /* Botón "Negocio en Bitrix (+/−)" en verde Bitrix. Se pinta
+                       vía CSS scopeado a la clase `st-key-bitrix_btn_...` que
+                       Streamlit expone en el DOM cuando un st.container recibe
+                       `key=`, para no afectar otros botones de la app. */
                     [class*="st-key-bitrix_btn_"] button {
                         background-color: #22C55E !important;
                         color: #FFFFFF !important;
@@ -397,17 +397,15 @@ if spreadsheet_id and bitrix_webhook_url:
                         border-color: #15803D !important;
                         color: #FFFFFF !important;
                     }
-                    /* Historial expandido: indent bajo columna Clasificación
-                       + margen negativo arriba para que quede pegado a la
-                       fila del contacto (sin franja vacía visible). */
+                    /* Historial expandido: NO usar margin-top negativo (causaba
+                       que la mini-tabla se superpusiera con la fila del
+                       contacto). Se distingue visualmente con una barra verde
+                       a la izquierda que la ata a la fila padre y un margen
+                       inferior mayor que separa del siguiente contacto. */
                     [class*="st-key-bitrix_hist_"] {
-                        padding-left: 32% !important;
-                        margin-top: -14px !important;
-                        margin-bottom: 6px !important;
-                    }
-                    /* Reduce el gap vertical entre filas del listado */
-                    [class*="st-key-fila_reporte_"] {
-                        margin-bottom: -8px !important;
+                        margin: 4px 0 14px 0 !important;
+                        padding-left: 12px !important;
+                        border-left: 3px solid #22C55E !important;
                     }
                     </style>
                     """,
@@ -469,9 +467,9 @@ if spreadsheet_id and bitrix_webhook_url:
                 # [Fecha | Nombre | Numero | Área de interés | Clasificación].
                 # Cuando el contacto tiene al menos un negocio en Bitrix, la
                 # celda de Clasificación se reemplaza por un botón
-                # "Negocio en Bitrix (+)" que despliega debajo, indentado bajo
-                # la columna correspondiente, la tabla de negocios históricos
-                # en el formato [Negociación | Nombre | Compañía | Etapa | Teléfono].
+                # "Negocio en Bitrix (+)" que despliega debajo la tabla de
+                # negocios históricos en el formato
+                # [Negociación | Nombre | Compañía | Etapa | Teléfono].
                 # -------------------------------------------------------
                 COL_WIDTHS = [1.1, 2.0, 1.8, 2.2, 2.6]
                 CLASIF_TEXTO_BLANCO = {"Spam/Servicios", "Derivado al área técnica", "Consulta incompatible"}
@@ -508,9 +506,6 @@ if spreadsheet_id and bitrix_webhook_url:
                     fondo_suave = hex_to_rgba(color_clasif, 0.08)
                     texto_fuerte = "#FFFFFF" if clasif_val in CLASIF_TEXTO_BLANCO else "#000000"
 
-                    # `st.container(key=...)` marca la fila con la clase
-                    # `st-key-fila_reporte_<mes>_<i>` en el DOM, que usamos
-                    # arriba para compactar el espacio vertical entre filas.
                     with st.container(key=f"fila_reporte_{mes_reporte}_{i}"):
                         row_cols = st.columns(COL_WIDTHS, gap="small")
 
@@ -566,12 +561,19 @@ if spreadsheet_id and bitrix_webhook_url:
                             expandido = False
 
                     if tiene_bitrix and expandido:
-                        # El historial se renderiza a ancho completo, pero el
-                        # CSS scopeado le agrega padding-left del ~32% (suma
-                        # relativa de las dos primeras columnas) para simular
-                        # el indent bajo la columna de Clasificación, y un
-                        # margin-top negativo para pegarlo a la fila de arriba.
+                        # El historial se renderiza a ancho completo, debajo
+                        # de la fila del contacto. Se distingue visualmente
+                        # con una barra verde a la izquierda (CSS scopeado a
+                        # la clase `st-key-bitrix_hist_...`) para dejar claro
+                        # que es "hijo" de la fila anterior, sin necesidad de
+                        # jugar con márgenes negativos que causaban solapes.
                         with st.container(key=f"bitrix_hist_{mes_reporte}_{i}"):
+                            st.markdown(
+                                f"<div style='font-size:0.82em;color:#6B7280;"
+                                f"margin-bottom:4px;'>📜 Historial del contacto "
+                                f"— <b>{len(historial)}</b> negocio(s) encontrados</div>",
+                                unsafe_allow_html=True,
+                            )
                             df_hist_display = pd.DataFrame({
                                 "Negociación": historial["TITLE"].fillna("—").replace("", "—").values,
                                 "Nombre": historial["Nombre_Contacto"].fillna("—").replace("", "—").values,
