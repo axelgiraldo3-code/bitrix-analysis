@@ -1,4 +1,7 @@
+import json
 import re
+from pathlib import Path
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -19,6 +22,72 @@ from utils.cache import (
     get_saved_classifications,
     save_classification,
 )
+
+# ---------------------------------------------------------
+# LISTA DE NÚMEROS EXCLUIDOS DE LOS REPORTES
+# ---------------------------------------------------------
+# La app permite mantener una lista blanca/negra de números que NO deben
+# aparecer en el Reporte Mensual (Tab 2) — típicamente teléfonos de
+# prueba internos que ensucian las métricas. Además, por regla fija se
+# excluyen números que no sean argentinos (cualquier país que no sea
+# +54 — WhatsApp entrega el número en formato internacional, así que
+# alcanza con chequear el prefijo). La exclusión aplica ÚNICAMENTE a la
+# fuente de Google Sheets (df_sheets) que alimenta al Tab 2; los datos
+# de Bitrix24 (Tab 3) NO se filtran.
+# La lista se persiste en `data/excluded_phones.json` para que sobreviva
+# entre reruns y entre corridas de la app (idéntica al patrón de
+# `credentials.json` y demás archivos que viven en la carpeta del
+# proyecto).
+
+EXCLUDED_PHONES_PATH = Path("data") / "excluded_phones.json"
+
+
+def load_excluded_phones() -> set[str]:
+    """Devuelve el conjunto de números excluidos manualmente (strings de
+    dígitos, sin '+' ni espacios). Vacío si el archivo no existe o está
+    mal formado — la función nunca lanza para no romper el arranque."""
+    try:
+        if EXCLUDED_PHONES_PATH.exists():
+            data = json.loads(EXCLUDED_PHONES_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return {re.sub(r"\D", "", str(p)) for p in data if str(p).strip()}
+    except Exception:
+        pass
+    return set()
+
+
+def save_excluded_phones(phones: set[str]) -> None:
+    """Persiste el set de excluidos en disco, ordenado y sin duplicados
+    ni entradas vacías. Crea la carpeta `data/` si no existe."""
+    EXCLUDED_PHONES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    limpios = sorted({re.sub(r"\D", "", str(p)) for p in phones if str(p).strip()})
+    limpios = [p for p in limpios if p]
+    EXCLUDED_PHONES_PATH.write_text(
+        json.dumps(limpios, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def is_argentina(phone) -> bool:
+    """True si el número corresponde a Argentina.
+
+    WhatsApp entrega los números en formato internacional con código de
+    país (E.164 sin '+'), así que Argentina siempre arranca con '54'.
+    Si el número llega sin código de país (formato local ≤ 11 dígitos)
+    lo tratamos también como AR — es lo que hace `format_phone_ar` río
+    abajo. Cualquier prefijo internacional distinto de 54 se considera
+    NO argentino (+86 China, +55 Brasil, +1 US/CA, +34 España, etc.).
+    """
+    p = re.sub(r"\D", "", str(phone or ""))
+    if not p:
+        return False
+    if p.startswith("54"):
+        return True
+    # Sin código de país (10-11 dígitos): asumimos formato local AR.
+    if len(p) <= 11:
+        return True
+    return False
+
 
 # ---------------------------------------------------------
 # CONFIGURACIÓN DE PÁGINA Y ESTILOS
@@ -83,6 +152,47 @@ bitrix_webhook_url = st.sidebar.text_input(
 st.sidebar.markdown("---")
 st.sidebar.subheader("Sincronización de Datos")
 btn_refresh = st.sidebar.button("🔄 Actualizar Datos desde APIs")
+
+# ---------------------------------------------------------
+# UI: gestión de números excluidos
+# ---------------------------------------------------------
+# Se ofrece un expander en la sidebar (colapsado por default para no
+# competir visualmente con la configuración) donde el usuario puede
+# pegar/editar la lista completa de números a omitir, uno por línea.
+# Al guardar, normalizamos a solo dígitos y persistimos en disco.
+st.sidebar.markdown("---")
+with st.sidebar.expander("📵 Números Excluidos de Reportes", expanded=False):
+    st.caption(
+        "Los números listados acá se omiten del **Reporte Mensual** "
+        "(Tab 2). Además, se descartan automáticamente todos los números "
+        "que no sean de Argentina (+54). El Tab 3 (Bitrix24) no se filtra."
+    )
+    _excluidos_actuales = load_excluded_phones()
+    excluded_text = st.text_area(
+        "Uno por línea (p.ej. 5491112345678):",
+        value="\n".join(sorted(_excluidos_actuales)),
+        height=160,
+        key="excluded_phones_input",
+        help="Podés pegar el número con o sin '+' y con o sin espacios; "
+             "se normaliza a solo dígitos al guardar.",
+    )
+    col_save, col_info = st.columns([1, 1])
+    with col_save:
+        if st.button("💾 Guardar", key="btn_save_excluded", width="stretch"):
+            nuevos = {
+                re.sub(r"\D", "", line)
+                for line in excluded_text.splitlines()
+                if line.strip()
+            }
+            nuevos = {p for p in nuevos if p}
+            try:
+                save_excluded_phones(nuevos)
+                st.success(f"Guardados {len(nuevos)} número(s).")
+                st.rerun()
+            except Exception as e:
+                st.error(f"No se pudo guardar la lista ({e}).")
+    with col_info:
+        st.caption(f"Actual: **{len(_excluidos_actuales)}**")
 
 # ---------------------------------------------------------
 # CARGA Y DESPLIEGUE PRINCIPAL
@@ -298,6 +408,39 @@ if spreadsheet_id and bitrix_webhook_url:
             mes_reporte = st.selectbox("Seleccionar Mes para el Reporte:", meses_disponibles, key="rep_mes")
             df_reporte = df_sheets[df_sheets["AñoMes"] == mes_reporte].copy()
 
+            # ---------------------------------------------------------
+            # Filtrado para el reporte: se omiten los contactos cuya
+            # línea está en la lista manual de excluidos (sidebar) y los
+            # que no sean argentinos (regla fija). Este filtro aplica
+            # SOLO al Tab 2 — los datos de Bitrix del Tab 3 nunca se
+            # tocan, y el Tab 1 (clasificación manual contacto por
+            # contacto) tampoco, para que si aparece un número raro se
+            # pueda clasificar o agregar a la lista de excluidos.
+            # `mask_excluidos` se calcula sobre `df_reporte` como se
+            # recibió; el conteo `_omitidos` alimenta el aviso de
+            # transparencia que se muestra debajo del subheader.
+            # ---------------------------------------------------------
+            _excluidos_manual = load_excluded_phones()
+            _tel_norm = (
+                df_reporte["Telefono_Limpio"]
+                .astype(str)
+                .apply(lambda p: re.sub(r"\D", "", p or ""))
+            )
+            mask_excluidos_manual = _tel_norm.isin(_excluidos_manual) & (_tel_norm != "")
+            mask_no_argentina = ~_tel_norm.apply(is_argentina)
+            mask_omitir = mask_excluidos_manual | mask_no_argentina
+            _omitidos_total = int(mask_omitir.sum())
+            _omitidos_manual = int(mask_excluidos_manual.sum())
+            _omitidos_no_ar = int((mask_no_argentina & ~mask_excluidos_manual).sum())
+            df_reporte = df_reporte[~mask_omitir].reset_index(drop=True)
+
+            if _omitidos_total:
+                st.info(
+                    f"ℹ️ Se omitieron **{_omitidos_total}** contacto(s) "
+                    f"del reporte: {_omitidos_manual} de la lista manual "
+                    f"y {_omitidos_no_ar} por no ser de Argentina (+54)."
+                )
+
             st.subheader(f"Porcentaje por Clasificación Manual - {mes_reporte}")
 
             if not df_reporte.empty:
@@ -347,6 +490,21 @@ if spreadsheet_id and bitrix_webhook_url:
                         periodo_anterior = None
 
                     df_mes_anterior = df_sheets[df_sheets["AñoMes"] == periodo_anterior] if periodo_anterior else pd.DataFrame()
+                    # Aplicamos el mismo filtro (excluidos manuales + no-AR)
+                    # al mes anterior, para que la comparativa quede en
+                    # bases equivalentes y el usuario no vea diferencias
+                    # infladas por contactos de prueba que se limpiaron.
+                    if not df_mes_anterior.empty:
+                        _tel_prev = (
+                            df_mes_anterior["Telefono_Limpio"]
+                            .astype(str)
+                            .apply(lambda p: re.sub(r"\D", "", p or ""))
+                        )
+                        _mask_prev_manual = _tel_prev.isin(_excluidos_manual) & (_tel_prev != "")
+                        _mask_prev_no_ar = ~_tel_prev.apply(is_argentina)
+                        df_mes_anterior = df_mes_anterior[
+                            ~(_mask_prev_manual | _mask_prev_no_ar)
+                        ]
 
                     counts_actual = df_reporte["Clasificacion_Manual"].value_counts()
                     counts_anterior = df_mes_anterior["Clasificacion_Manual"].value_counts() if not df_mes_anterior.empty else pd.Series(dtype=int)
