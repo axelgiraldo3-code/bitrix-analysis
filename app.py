@@ -372,38 +372,154 @@ if spreadsheet_id and bitrix_webhook_url:
 
                 st.subheader("Tabla de Datos con Clasificación Agregada")
 
-                # Estructura fija de columnas solicitada:
+                # -------------------------------------------------------
+                # Precómputo: normalización de la base Bitrix para poder
+                # cruzar cada consulta con sus negocios históricos (no solo
+                # los del mes filtrado). El matching es por teléfono y, si
+                # el teléfono no da hits, por nombre (case-insensitive).
+                # -------------------------------------------------------
+                df_bitrix_norm = df_bitrix.copy() if not df_bitrix.empty else pd.DataFrame(
+                    columns=["Telefono", "Nombre_Contacto", "TITLE", "Compania", "Etapa"]
+                )
+                if not df_bitrix_norm.empty:
+                    df_bitrix_norm["_tel"] = df_bitrix_norm["Telefono"].astype(str).str.strip()
+                    df_bitrix_norm["_nombre"] = (
+                        df_bitrix_norm["Nombre_Contacto"].astype(str).str.strip().str.lower()
+                    )
+                    df_bitrix_norm["Etapa"] = df_bitrix_norm["Etapa"].apply(normalizar_etapa)
+
+                def _buscar_historial_bitrix(tel_limpio, nombre):
+                    """Devuelve un DataFrame con los negocios históricos del contacto
+                    (match por teléfono primero, por nombre como fallback). Vacío si
+                    no hay coincidencias o si no hay datos de Bitrix."""
+                    if df_bitrix_norm.empty:
+                        return df_bitrix_norm
+                    tel = str(tel_limpio or "").strip()
+                    if tel and tel.lower() not in ("nan", "none", ""):
+                        hits = df_bitrix_norm[df_bitrix_norm["_tel"] == tel]
+                        if not hits.empty:
+                            return hits
+                    nom = str(nombre or "").strip().lower()
+                    if nom and nom not in ("nan", "none", ""):
+                        hits = df_bitrix_norm[df_bitrix_norm["_nombre"] == nom]
+                        if not hits.empty:
+                            return hits
+                    return df_bitrix_norm.iloc[0:0]
+
+                # -------------------------------------------------------
+                # Render row-by-row: cada consulta ocupa una fila de columnas
                 # [Fecha | Nombre | Numero | Área de interés | Clasificación].
-                df_display = pd.DataFrame({
-                    "Fecha": pd.to_datetime(df_reporte["FechaHora"], errors="coerce").dt.strftime("%d-%m-%y"),
-                    "Nombre": df_reporte["Nombre"],
-                    "Numero": df_reporte["Telefono_Limpio"].apply(format_phone_ar),
-                    "Área de interés": df_reporte["Área de interés"],
-                    "Clasificación": df_reporte["Clasificacion_Manual"],
-                })
+                # Cuando el contacto tiene al menos un negocio en Bitrix, la
+                # celda de Clasificación se reemplaza por un botón
+                # "Negocio en Bitrix (+)" que despliega debajo, indentado bajo
+                # la columna correspondiente, la tabla de negocios históricos
+                # en el formato [Negociación | Nombre | Compañía | Etapa | Teléfono].
+                # -------------------------------------------------------
+                COL_WIDTHS = [1.1, 2.0, 1.8, 2.2, 2.6]
+                CLASIF_TEXTO_BLANCO = {"Spam/Servicios", "Derivado al área técnica", "Consulta incompatible"}
 
-                def estilo_fila(row):
-                    """
-                    Pinta toda la fila con el color de la clasificación a muy baja opacidad
-                    (para identificar el grupo de un vistazo) y reserva el color sólido
-                    fuerte únicamente para la celda de "Clasificación".
-                    """
-                    clasif = row["Clasificación"]
-                    color = REPORT_COLOR_MAP.get(clasif, "#FFFFFF")
-                    fondo_suave = hex_to_rgba(color, 0.08)
-                    texto_fuerte = "#FFFFFF" if clasif in ["Spam/Servicios", "Derivado al área técnica", "Consulta incompatible"] else "#000000"
+                # Encabezado
+                hdr_cols = st.columns(COL_WIDTHS)
+                for hc, titulo in zip(
+                    hdr_cols,
+                    ["Fecha", "Nombre", "Numero", "Área de interés", "Clasificación"],
+                ):
+                    hc.markdown(f"**{titulo}**")
+                st.markdown(
+                    "<hr style='margin:2px 0 8px 0;border:none;border-top:1px solid #ddd;'/>",
+                    unsafe_allow_html=True,
+                )
 
-                    estilos = []
-                    for col in row.index:
-                        if col == "Clasificación":
-                            estilos.append(f"background-color: {color}; color: {texto_fuerte}; font-weight: bold;")
-                        else:
-                            estilos.append(f"background-color: {fondo_suave};")
-                    return estilos
+                df_reporte_iter = df_reporte.reset_index(drop=True)
+                for i, r in df_reporte_iter.iterrows():
+                    fecha_val = pd.to_datetime(r.get("FechaHora"), errors="coerce")
+                    fecha_str = fecha_val.strftime("%d-%m-%y") if pd.notna(fecha_val) else "—"
+                    nombre_val = str(r.get("Nombre", "") or "").strip() or "—"
+                    tel_raw = str(r.get("Telefono_Limpio", "") or "").strip()
+                    tel_display = format_phone_ar(tel_raw) if tel_raw else "—"
+                    area_val = str(r.get("Área de interés", "") or "").strip() or "—"
+                    clasif_val = r.get("Clasificacion_Manual", "Pendiente")
 
-                df_styled = df_display.style.apply(estilo_fila, axis=1)
+                    historial = _buscar_historial_bitrix(tel_raw, r.get("Nombre"))
+                    tiene_bitrix = not historial.empty
 
-                st.dataframe(df_styled, width="stretch", hide_index=True)
+                    # Pintado suave de la fila con el color de la clasificación
+                    color_clasif = REPORT_COLOR_MAP.get(clasif_val, "#FFFFFF")
+                    fondo_suave = hex_to_rgba(color_clasif, 0.08)
+                    texto_fuerte = "#FFFFFF" if clasif_val in CLASIF_TEXTO_BLANCO else "#000000"
+
+                    row_cols = st.columns(COL_WIDTHS)
+
+                    celda_texto = (
+                        "padding:6px 8px;border-radius:4px;"
+                        f"background-color:{fondo_suave};"
+                    )
+                    row_cols[0].markdown(
+                        f"<div style='{celda_texto}'>{fecha_str}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    row_cols[1].markdown(
+                        f"<div style='{celda_texto}'>{nombre_val}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    row_cols[2].markdown(
+                        f"<div style='{celda_texto}'>{tel_display}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    row_cols[3].markdown(
+                        f"<div style='{celda_texto}'>{area_val}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    expand_key = f"expand_bitrix_{mes_reporte}_{i}"
+                    if tiene_bitrix:
+                        expandido = st.session_state.get(expand_key, False)
+                        label_btn = (
+                            "Negocio en Bitrix (−)" if expandido else "Negocio en Bitrix (+)"
+                        )
+                        if row_cols[4].button(
+                            label_btn,
+                            key=f"btn_bitrix_{mes_reporte}_{i}",
+                            width="stretch",
+                        ):
+                            st.session_state[expand_key] = not expandido
+                            expandido = not expandido
+                    else:
+                        row_cols[4].markdown(
+                            f"<div style='background-color:{color_clasif};color:{texto_fuerte};"
+                            f"font-weight:bold;padding:6px 10px;border-radius:6px;"
+                            f"text-align:center'>{clasif_val}</div>",
+                            unsafe_allow_html=True,
+                        )
+                        expandido = False
+
+                    if tiene_bitrix and expandido:
+                        # Indentamos el detalle bajo las primeras dos columnas
+                        # (Fecha + Nombre) para que la tabla histórica quede
+                        # visualmente ubicada bajo la columna de Clasificación.
+                        indent_left = sum(COL_WIDTHS[:2])
+                        indent_right = sum(COL_WIDTHS[2:])
+                        _, right = st.columns([indent_left, indent_right])
+                        with right:
+                            df_hist_display = pd.DataFrame({
+                                "Negociación": historial["TITLE"].values,
+                                "Nombre": historial["Nombre_Contacto"].values,
+                                "Compañía": historial["Compania"].fillna("Sin compañía").replace("", "Sin compañía").values,
+                                "Etapa": historial["Etapa"].values,
+                                "Teléfono": historial["Telefono"].apply(format_phone_full).values,
+                            })
+
+                            def _estilo_hist(row):
+                                color = BITRIX_STAGE_COLORS.get(row["Etapa"], "#FFFFFF")
+                                fondo = hex_to_rgba(color, 0.10)
+                                return [f"background-color: {fondo};" for _ in row.index]
+
+                            df_hist_styled = df_hist_display.style.apply(_estilo_hist, axis=1)
+                            st.dataframe(
+                                df_hist_styled,
+                                width="stretch",
+                                hide_index=True,
+                            )
 
                 col_csv, _ = st.columns(2)
                 csv_bytes = df_reporte.to_csv(index=False, encoding="utf-8-sig").encode('utf-8-sig')
@@ -457,26 +573,19 @@ if spreadsheet_id and bitrix_webhook_url:
 
                         st.subheader("Lista de negociaciones")
 
-                        # La columna combinada "Datos del cliente" se separa en tres columnas
-                        # propias (Nombre, Compañía, Tel) para que cada dato sea filtrable/legible
-                        # por separado. El título del negocio (TITLE) se renombra a "Negociación"
-                        # para no chocar con el nombre del contacto. Se conserva "Tipo de
-                        # máquina" en el DataFrame base para que quede incluido en el CSV y
-                        # siga disponible para el gráfico de barras (que se arma sobre
-                        # df_bitrix_mes); en la vista se oculta más abajo.
+                        # Estructura solicitada de la tabla mostrada:
+                        # [Negociación | Nombre | Compañía | Etapa | Teléfono].
+                        # Se conserva además "Tipo de máquina" en df_bitrix_display para
+                        # que el CSV descargable siga trayéndola (el gráfico de barras se
+                        # arma sobre df_bitrix_mes, que ya la tiene).
                         df_bitrix_display = pd.DataFrame({
                             "Negociación": df_bitrix_mes["TITLE"].values,
-                            "Etapa": df_bitrix_mes["Etapa"].values,
                             "Nombre": df_bitrix_mes["Nombre_Contacto"].values,
                             "Compañía": df_bitrix_mes["Compania"].values,
-                            "Tel": df_bitrix_mes["Telefono"].apply(format_phone_full).values,
+                            "Etapa": df_bitrix_mes["Etapa"].values,
+                            "Teléfono": df_bitrix_mes["Telefono"].apply(format_phone_full).values,
                             "Tipo de máquina": df_bitrix_mes["Tipo de máquina"].values,
                         })
-                        # Guardamos el teléfono en su forma original (sin formatear) para
-                        # usarlo como clave estable al buscar el historial del contacto.
-                        # `format_phone_full` puede introducir espacios/formato que rompen
-                        # una comparación directa contra df_bitrix["Telefono"].
-                        _telefonos_raw = df_bitrix_mes["Telefono"].astype(str).str.strip().values
 
                         def estilo_fila_bitrix(row):
                             """
@@ -487,94 +596,14 @@ if spreadsheet_id and bitrix_webhook_url:
                             fondo_suave = hex_to_rgba(color, 0.08)
                             return [f"background-color: {fondo_suave};" for _ in row.index]
 
-                        # Vista: se oculta "Tipo de máquina" para que la tabla mostrada
-                        # quede compacta, sin perderla ni del CSV ni del gráfico de barras
-                        # (que se calcula sobre df_bitrix_mes).
-                        columnas_visibles = ["Negociación", "Etapa", "Nombre", "Compañía", "Tel"]
+                        # Vista: se oculta "Tipo de máquina" en pantalla; sigue estando en
+                        # el CSV descargable (df_bitrix_display) y en df_bitrix_mes (que
+                        # alimenta el gráfico de barras).
+                        columnas_visibles = ["Negociación", "Nombre", "Compañía", "Etapa", "Teléfono"]
                         df_bitrix_visible = df_bitrix_display[columnas_visibles].reset_index(drop=True)
                         df_bitrix_styled = df_bitrix_visible.style.apply(estilo_fila_bitrix, axis=1)
 
-                        # Habilitamos selección de una fila para poder "expandir" el
-                        # historial completo del contacto elegido, sin recargar la tabla.
-                        seleccion_bitrix = st.dataframe(
-                            df_bitrix_styled,
-                            width="stretch",
-                            hide_index=True,
-                            on_select="rerun",
-                            selection_mode="single-row",
-                            key=f"tabla_bitrix_{mes_sel_bitrix}",
-                        )
-
-                        # `st.dataframe(on_select=...)` devuelve un objeto con .selection.rows
-                        # (lista de índices de las filas seleccionadas). Cuando el usuario
-                        # aún no hizo click, la lista viene vacía.
-                        try:
-                            filas_sel = list(seleccion_bitrix.selection.rows)
-                        except AttributeError:
-                            filas_sel = []
-
-                        st.caption(
-                            "💡 Hacé click sobre una fila para expandir el historial de "
-                            "negocios del contacto en toda la base cargada."
-                        )
-
-                        if filas_sel:
-                            idx_sel = filas_sel[0]
-                            contacto_sel = df_bitrix_visible.iloc[idx_sel]
-                            nombre_sel = str(contacto_sel.get("Nombre", "") or "").strip()
-                            tel_sel = str(_telefonos_raw[idx_sel] or "").strip()
-
-                            titulo_contacto = nombre_sel or contacto_sel.get("Tel") or "contacto seleccionado"
-                            with st.expander(
-                                f"📜 Historial de negocios de **{titulo_contacto}**",
-                                expanded=True,
-                            ):
-                                # Buscamos en toda la base de Bitrix (no solo el mes filtrado)
-                                # las negociaciones del mismo contacto. Preferimos matchear
-                                # por teléfono (más único); si el contacto no tiene teléfono
-                                # cargado, caemos a comparar por nombre (case-insensitive).
-                                df_hist = df_bitrix.copy()
-                                df_hist["Etapa"] = df_hist["Etapa"].apply(normalizar_etapa)
-
-                                tel_valido = tel_sel and tel_sel.lower() not in ("nan", "none", "")
-                                if tel_valido:
-                                    mask_hist = df_hist["Telefono"].astype(str).str.strip() == tel_sel
-                                elif nombre_sel:
-                                    mask_hist = (
-                                        df_hist["Nombre_Contacto"].astype(str).str.strip().str.lower()
-                                        == nombre_sel.lower()
-                                    )
-                                else:
-                                    mask_hist = pd.Series(False, index=df_hist.index)
-
-                                df_hist = df_hist[mask_hist]
-
-                                if df_hist.empty:
-                                    st.caption(
-                                        "No se encontraron negocios históricos para este contacto."
-                                    )
-                                else:
-                                    # Estructura solicitada:
-                                    # [Negociación | Nombre | Compañía | Etapa | Teléfono].
-                                    df_hist_display = pd.DataFrame({
-                                        "Negociación": df_hist["TITLE"].values,
-                                        "Nombre": df_hist["Nombre_Contacto"].values,
-                                        "Compañía": df_hist["Compania"].values,
-                                        "Etapa": df_hist["Etapa"].values,
-                                        "Teléfono": df_hist["Telefono"].apply(format_phone_full).values,
-                                    })
-                                    df_hist_styled = df_hist_display.style.apply(
-                                        estilo_fila_bitrix, axis=1
-                                    )
-                                    st.caption(
-                                        f"Total: **{len(df_hist_display)}** negocio(s) "
-                                        f"encontrados en toda la base cargada."
-                                    )
-                                    st.dataframe(
-                                        df_hist_styled,
-                                        width="stretch",
-                                        hide_index=True,
-                                    )
+                        st.dataframe(df_bitrix_styled, width="stretch", hide_index=True)
 
                         # El CSV mantiene "Tipo de máquina" (df_bitrix_display, no df_bitrix_visible)
                         # para que el archivo descargado siga siendo compatible con análisis
