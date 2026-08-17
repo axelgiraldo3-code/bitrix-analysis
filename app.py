@@ -460,15 +460,23 @@ if spreadsheet_id and bitrix_webhook_url:
                         # La columna combinada "Datos del cliente" se separa en tres columnas
                         # propias (Nombre, Compañía, Tel) para que cada dato sea filtrable/legible
                         # por separado. El título del negocio (TITLE) se renombra a "Negociación"
-                        # para no chocar con el nombre del contacto.
+                        # para no chocar con el nombre del contacto. Se conserva "Tipo de
+                        # máquina" en el DataFrame base para que quede incluido en el CSV y
+                        # siga disponible para el gráfico de barras (que se arma sobre
+                        # df_bitrix_mes); en la vista se oculta más abajo.
                         df_bitrix_display = pd.DataFrame({
-                            "Negociación": df_bitrix_mes["TITLE"],
-                            "Etapa": df_bitrix_mes["Etapa"],
-                            "Nombre": df_bitrix_mes["Nombre_Contacto"],
-                            "Compañía": df_bitrix_mes["Compania"],
-                            "Tel": df_bitrix_mes["Telefono"].apply(format_phone_full),
-                            "Tipo de máquina": df_bitrix_mes["Tipo de máquina"],
+                            "Negociación": df_bitrix_mes["TITLE"].values,
+                            "Etapa": df_bitrix_mes["Etapa"].values,
+                            "Nombre": df_bitrix_mes["Nombre_Contacto"].values,
+                            "Compañía": df_bitrix_mes["Compania"].values,
+                            "Tel": df_bitrix_mes["Telefono"].apply(format_phone_full).values,
+                            "Tipo de máquina": df_bitrix_mes["Tipo de máquina"].values,
                         })
+                        # Guardamos el teléfono en su forma original (sin formatear) para
+                        # usarlo como clave estable al buscar el historial del contacto.
+                        # `format_phone_full` puede introducir espacios/formato que rompen
+                        # una comparación directa contra df_bitrix["Telefono"].
+                        _telefonos_raw = df_bitrix_mes["Telefono"].astype(str).str.strip().values
 
                         def estilo_fila_bitrix(row):
                             """
@@ -479,10 +487,98 @@ if spreadsheet_id and bitrix_webhook_url:
                             fondo_suave = hex_to_rgba(color, 0.08)
                             return [f"background-color: {fondo_suave};" for _ in row.index]
 
-                        df_bitrix_styled = df_bitrix_display.style.apply(estilo_fila_bitrix, axis=1)
+                        # Vista: se oculta "Tipo de máquina" para que la tabla mostrada
+                        # quede compacta, sin perderla ni del CSV ni del gráfico de barras
+                        # (que se calcula sobre df_bitrix_mes).
+                        columnas_visibles = ["Negociación", "Etapa", "Nombre", "Compañía", "Tel"]
+                        df_bitrix_visible = df_bitrix_display[columnas_visibles].reset_index(drop=True)
+                        df_bitrix_styled = df_bitrix_visible.style.apply(estilo_fila_bitrix, axis=1)
 
-                        st.dataframe(df_bitrix_styled, width="stretch", hide_index=True)
+                        # Habilitamos selección de una fila para poder "expandir" el
+                        # historial completo del contacto elegido, sin recargar la tabla.
+                        seleccion_bitrix = st.dataframe(
+                            df_bitrix_styled,
+                            width="stretch",
+                            hide_index=True,
+                            on_select="rerun",
+                            selection_mode="single-row",
+                            key=f"tabla_bitrix_{mes_sel_bitrix}",
+                        )
 
+                        # `st.dataframe(on_select=...)` devuelve un objeto con .selection.rows
+                        # (lista de índices de las filas seleccionadas). Cuando el usuario
+                        # aún no hizo click, la lista viene vacía.
+                        try:
+                            filas_sel = list(seleccion_bitrix.selection.rows)
+                        except AttributeError:
+                            filas_sel = []
+
+                        st.caption(
+                            "💡 Hacé click sobre una fila para expandir el historial de "
+                            "negocios del contacto en toda la base cargada."
+                        )
+
+                        if filas_sel:
+                            idx_sel = filas_sel[0]
+                            contacto_sel = df_bitrix_visible.iloc[idx_sel]
+                            nombre_sel = str(contacto_sel.get("Nombre", "") or "").strip()
+                            tel_sel = str(_telefonos_raw[idx_sel] or "").strip()
+
+                            titulo_contacto = nombre_sel or contacto_sel.get("Tel") or "contacto seleccionado"
+                            with st.expander(
+                                f"📜 Historial de negocios de **{titulo_contacto}**",
+                                expanded=True,
+                            ):
+                                # Buscamos en toda la base de Bitrix (no solo el mes filtrado)
+                                # las negociaciones del mismo contacto. Preferimos matchear
+                                # por teléfono (más único); si el contacto no tiene teléfono
+                                # cargado, caemos a comparar por nombre (case-insensitive).
+                                df_hist = df_bitrix.copy()
+                                df_hist["Etapa"] = df_hist["Etapa"].apply(normalizar_etapa)
+
+                                tel_valido = tel_sel and tel_sel.lower() not in ("nan", "none", "")
+                                if tel_valido:
+                                    mask_hist = df_hist["Telefono"].astype(str).str.strip() == tel_sel
+                                elif nombre_sel:
+                                    mask_hist = (
+                                        df_hist["Nombre_Contacto"].astype(str).str.strip().str.lower()
+                                        == nombre_sel.lower()
+                                    )
+                                else:
+                                    mask_hist = pd.Series(False, index=df_hist.index)
+
+                                df_hist = df_hist[mask_hist]
+
+                                if df_hist.empty:
+                                    st.caption(
+                                        "No se encontraron negocios históricos para este contacto."
+                                    )
+                                else:
+                                    # Estructura solicitada:
+                                    # [Negociación | Nombre | Compañía | Etapa | Teléfono].
+                                    df_hist_display = pd.DataFrame({
+                                        "Negociación": df_hist["TITLE"].values,
+                                        "Nombre": df_hist["Nombre_Contacto"].values,
+                                        "Compañía": df_hist["Compania"].values,
+                                        "Etapa": df_hist["Etapa"].values,
+                                        "Teléfono": df_hist["Telefono"].apply(format_phone_full).values,
+                                    })
+                                    df_hist_styled = df_hist_display.style.apply(
+                                        estilo_fila_bitrix, axis=1
+                                    )
+                                    st.caption(
+                                        f"Total: **{len(df_hist_display)}** negocio(s) "
+                                        f"encontrados en toda la base cargada."
+                                    )
+                                    st.dataframe(
+                                        df_hist_styled,
+                                        width="stretch",
+                                        hide_index=True,
+                                    )
+
+                        # El CSV mantiene "Tipo de máquina" (df_bitrix_display, no df_bitrix_visible)
+                        # para que el archivo descargado siga siendo compatible con análisis
+                        # posteriores por tipo de máquina.
                         csv_bitrix = df_bitrix_display.to_csv(index=False, encoding="utf-8-sig").encode('utf-8-sig')
                         st.download_button(
                             label="📥 Descargar Negociaciones Filtradas (CSV)",
