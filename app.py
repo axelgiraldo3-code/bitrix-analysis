@@ -15,6 +15,7 @@ from utils.helpers import (
     format_phone_full,
     format_mes_legible,
 )
+from utils.phone_ar import format_phone_ar_e164, is_argentina_e164
 from utils.cache import (
     get_data_with_local_cache,
     apply_automatic_classifications,
@@ -71,22 +72,18 @@ def save_excluded_phones(phones: set[str]) -> None:
 def is_argentina(phone) -> bool:
     """True si el número corresponde a Argentina.
 
-    WhatsApp entrega los números en formato internacional con código de
-    país (E.164 sin '+'), así que Argentina siempre arranca con '54'.
-    Si el número llega sin código de país (formato local ≤ 11 dígitos)
-    lo tratamos también como AR — es lo que hace `format_phone_ar` río
-    abajo. Cualquier prefijo internacional distinto de 54 se considera
-    NO argentino (+86 China, +55 Brasil, +1 US/CA, +34 España, etc.).
+    Delegado a `format_phone_ar_e164()` + `is_argentina_e164()`, que
+    valida el código de área contra los sets oficiales de Argentina
+    (O(1) por lookup) en vez de aceptar "cualquier cosa de 10-11
+    dígitos" como AR. Esto evita falsos positivos con números
+    internacionales que casualmente tienen 10-11 dígitos (ej. algunos
+    móviles de Chile o Uruguay) y falsos negativos con números
+    argentinos escritos sin '+54' pero con formato ambiguo.
+
+    Un número que empieza con "+" o "00" y NO es de país 54 se
+    considera NO argentino, sin importar cuántos dígitos tenga.
     """
-    p = re.sub(r"\D", "", str(phone or ""))
-    if not p:
-        return False
-    if p.startswith("54"):
-        return True
-    # Sin código de país (10-11 dígitos): asumimos formato local AR.
-    if len(p) <= 11:
-        return True
-    return False
+    return is_argentina_e164(format_phone_ar_e164(phone))
 
 
 # ---------------------------------------------------------
