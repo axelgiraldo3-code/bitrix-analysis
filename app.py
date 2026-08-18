@@ -420,9 +420,7 @@ if spreadsheet_id and bitrix_webhook_url:
             _excluidos_manual = load_excluded_phones()
             _tel_norm = (
                 df_reporte["Telefono_Limpio"]
-                .fillna("")
-                .astype(str)
-                .str.replace(r"\D", "", regex=True)
+                .apply(lambda p: re.sub(r"\D", "", str(p)) if pd.notna(p) and p is not None else "")
             )
             mask_excluidos_manual = _tel_norm.isin(_excluidos_manual) & (_tel_norm != "")
             mask_no_argentina = ~_tel_norm.apply(is_argentina)
