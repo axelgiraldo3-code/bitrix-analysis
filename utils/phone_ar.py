@@ -106,6 +106,13 @@ def format_phone_ar_e164(raw):
     if not digits:
         return s
 
+    # Marca "el origen declaró AR" (venía con +54, 0054, o los dígitos
+    # crudos empiezan con 54 — típico de WhatsApp que entrega el número
+    # en E.164 sin '+'). Se usa más abajo como fallback: si el catálogo
+    # de códigos de área está incompleto, un número que claramente vino
+    # como AR NO debe caer al bucket de "extranjero".
+    _origen_ar = (intl_digits is not None) or digits.startswith("54")
+
     # ------------------------------------------------------------------
     # 2) NORMALIZACIÓN DEL BLOQUE ARGENTINO
     # ------------------------------------------------------------------
@@ -149,6 +156,17 @@ def format_phone_ar_e164(raw):
 
         if len(area) + len(local) == 10:
             return f"+549{area}{local}"
+
+    # Fallback permisivo: el catálogo de códigos de área en el JSON está
+    # incompleto (fue el caso con Balcarce/262, y va a volver a pasar
+    # con otras áreas de baja frecuencia). Si el input claramente venía
+    # como AR (prefijo 54, +54 o 0054) y quedó reducido a exactamente 10
+    # dígitos después de sacar país + '9' móvil, lo aceptamos como AR
+    # aunque el área no matchee. Ganamos robustez sin abrir la puerta a
+    # falsos positivos: un número sin prefijo AR sigue cayendo al
+    # `return s` de abajo.
+    if _origen_ar and len(digits) == 10:
+        return f"+549{digits}"
 
     # Nada validó → devolvemos el input original tal cual.
     return s
