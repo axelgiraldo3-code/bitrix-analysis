@@ -1,7 +1,8 @@
 import json
 import re
 from pathlib import Path
-
+import requests
+import time
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -20,6 +21,7 @@ from utils.cache import (
     get_data_with_local_cache,
     apply_automatic_classifications,
     persist_automatic_classifications,
+    persist_enriched_sheets,
     get_saved_classifications,
     save_classification,
 )
@@ -227,6 +229,17 @@ if spreadsheet_id and bitrix_webhook_url:
             # solo en memoria (comportamiento anterior).
             st.sidebar.warning(f"No se pudieron persistir las clasificaciones automáticas ({e}).")
 
+        # Persistir el df_sheets YA ENRIQUECIDO al CSV local. El
+        # apply_automatic_classifications() de arriba sobreescribe la
+        # columna "Nombre" con el nombre oficial de Bitrix cuando hay
+        # match por teléfono; sin esta línea ese enriquecimiento solo
+        # vive en memoria y se pierde entre reruns / reloads del
+        # navegador. Al escribirlo al CSV, la próxima corrida (sin
+        # force_refresh) ya trae los nombres de Bitrix grabados y el
+        # reporte se ve completo aunque en ese momento Bitrix esté
+        # caído o tarde en responder. No lanza si el disco falla.
+        persist_enriched_sheets(df_sheets)
+
         tab_clasif, tab_reporte_sheets, tab_bitrix = st.tabs([
             "Clasificación Manual (Contacto por Contacto)",
             "Reporte Mensual de Consultas",
@@ -338,12 +351,32 @@ if spreadsheet_id and bitrix_webhook_url:
                         tel_contacto_limpio = re.sub(r"\D", "", str(tel_contacto_raw).split(".")[0]) if pd.notna(tel_contacto_raw) else ""
                         tel_contacto_display = format_phone_ar(tel_contacto_limpio) if tel_contacto_limpio else "Sin número"
 
-                        st.subheader(f"Contacto: {tel_contacto_display}")
-                        st.write(f"👤 **Nombre:** {nombre_valido}")
-                        st.write(f"📅 **Fecha y Hora:** {contacto.get('FechaHora')}")
-                        st.write(f"🔗 **Enlace WhatsApp:** [{contacto.get('Enlace de Whatsapp')}]({contacto.get('Enlace de Whatsapp')})")
-                        st.write(f"🏷️ **Área de Interés:** {contacto.get('Área de interés')}")
-                        st.write(f"🤖 **Clasificación Bot:** `{contacto.get('Clasificación')}`")
+                        # Datos del contacto en formato tabla — solo los
+                        # cuatro campos pedidos [Número | Nombre | Fecha y
+                        # Hora | Área de interés]. El "Enlace WhatsApp" y
+                        # la "Clasificación Bot" quedaron fuera a pedido
+                        # del usuario. El "Resumen de la consulta" se
+                        # mantiene abajo con su título y text_area
+                        # deshabilitado (mismo formato que antes).
+                        _area_raw = contacto.get("Área de interés")
+                        _area_display = (
+                            str(_area_raw).strip()
+                            if pd.notna(_area_raw) and str(_area_raw).strip()
+                            else "—"
+                        )
+                        _fecha_raw = contacto.get("FechaHora")
+                        _fecha_display = (
+                            str(_fecha_raw)
+                            if pd.notna(_fecha_raw) and str(_fecha_raw).strip()
+                            else "—"
+                        )
+                        df_contacto = pd.DataFrame([{
+                            "Número": tel_contacto_display,
+                            "Nombre": nombre_valido,
+                            "Fecha y Hora": _fecha_display,
+                            "Área de interés": _area_display,
+                        }])
+                        st.dataframe(df_contacto, width="stretch", hide_index=True)
 
                         # El resumen llega concatenado con separadores " | "; se reemplazan
                         # por saltos de línea para mejorar la legibilidad del bloque.
@@ -423,6 +456,17 @@ if spreadsheet_id and bitrix_webhook_url:
             # transparencia que se muestra debajo del subheader.
             # ---------------------------------------------------------
             _excluidos_manual = load_excluded_phones()
+            # Normalizamos AMBOS lados de la comparación a E.164 vía
+            # `format_phone_ar_e164`, así una misma línea matchea sin
+            # importar en qué formato se pegó (con o sin '+54', con o
+            # sin '9' móvil, con o sin espacios). Sin esto, un número
+            # guardado como "5493515083663" nunca matcheaba con la
+            # forma local "3515083663" almacenada en Telefono_Limpio.
+            _excluidos_e164 = {
+                format_phone_ar_e164(p)
+                for p in _excluidos_manual
+                if format_phone_ar_e164(p)
+            }
             _tel_norm = (
                 df_reporte["Telefono_Limpio"]
                 .apply(
@@ -431,7 +475,8 @@ if spreadsheet_id and bitrix_webhook_url:
                     else ""
                 )
             )
-            mask_excluidos_manual = _tel_norm.isin(_excluidos_manual) & (_tel_norm != "")
+            _tel_e164 = _tel_norm.apply(format_phone_ar_e164)
+            mask_excluidos_manual = _tel_e164.isin(_excluidos_e164) & (_tel_e164 != "")
             mask_no_argentina = ~_tel_norm.apply(is_argentina)
             mask_omitir = mask_excluidos_manual | mask_no_argentina
             _omitidos_total = int(mask_omitir.sum())
@@ -439,12 +484,15 @@ if spreadsheet_id and bitrix_webhook_url:
             _omitidos_no_ar = int((mask_no_argentina & ~mask_excluidos_manual).sum())
             df_reporte = df_reporte[~mask_omitir].reset_index(drop=True)
 
-            if _omitidos_total:
-                st.info(
-                    f"ℹ️ Se omitieron **{_omitidos_total}** contacto(s) "
-                    f"del reporte: {_omitidos_manual} de la lista manual "
-                    f"y {_omitidos_no_ar} por no ser de Argentina (+54)."
-                )
+            # El aviso "Se omitieron N contactos..." se muestra al FINAL
+            # del tab (debajo de la tabla y del botón de descarga) — se
+            # arma acá con los conteos que acabamos de calcular para
+            # tenerlos a mano, pero el `st.info(...)` se emite abajo.
+            _aviso_omitidos = (
+                f"ℹ️ Se omitieron **{_omitidos_total}** contacto(s) del reporte: "
+                f"{_omitidos_manual} de la lista manual y {_omitidos_no_ar} "
+                f"por no ser de Argentina (+54)."
+            ) if _omitidos_total else ""
 
             st.subheader(f"Porcentaje por Clasificación Manual - {mes_reporte}")
 
@@ -508,7 +556,11 @@ if spreadsheet_id and bitrix_webhook_url:
                                 else ""
                             )
                         )
-                        _mask_prev_manual = _tel_prev.isin(_excluidos_manual) & (_tel_prev != "")
+                        # Mismo criterio que arriba: comparamos en E.164
+                        # para tolerar diferencias de formato entre la
+                        # lista manual y el Telefono_Limpio de la Sheet.
+                        _tel_prev_e164 = _tel_prev.apply(format_phone_ar_e164)
+                        _mask_prev_manual = _tel_prev_e164.isin(_excluidos_e164) & (_tel_prev_e164 != "")
                         _mask_prev_no_ar = ~_tel_prev.apply(is_argentina)
                         df_mes_anterior = df_mes_anterior[
                             ~(_mask_prev_manual | _mask_prev_no_ar)
@@ -586,6 +638,14 @@ if spreadsheet_id and bitrix_webhook_url:
                     mime="text/csv"
                 )
 
+            # Aviso de contactos omitidos al pie del tab (debajo de la
+            # tabla y del botón de descarga). Se pone acá — fuera del
+            # `if not df_reporte.empty` — para que aparezca también
+            # cuando TODOS los contactos del mes fueron omitidos y el
+            # reporte quedó vacío.
+            if _aviso_omitidos:
+                st.info(_aviso_omitidos)
+
         # =========================================================
         # TAB 3: ANÁLISIS DE NEGOCIACIONES BITRIX24 (SALE)
         # =========================================================
@@ -608,24 +668,127 @@ if spreadsheet_id and bitrix_webhook_url:
 
                         df_grouped = df_bitrix_mes.groupby(["Tipo de máquina", "Etapa"]).size().reset_index(name="Cantidad")
 
+                        # % de cada etapa DENTRO de la barra (Tipo de máquina).
+                        # Cada barra suma 100% así se lee la composición por
+                        # etapa de cada tipo, no la cantidad absoluta. La
+                        # etiqueta se oculta si el segmento es < 5% para no
+                        # amontonar texto en porciones diminutas.
+                        df_grouped["Total_tipo"] = df_grouped.groupby("Tipo de máquina")["Cantidad"].transform("sum")
+                        df_grouped["Porcentaje"] = (df_grouped["Cantidad"] / df_grouped["Total_tipo"] * 100).round(1)
+                        df_grouped["Etiqueta"] = df_grouped["Porcentaje"].apply(
+                            lambda p: f"{p:.0f}%" if p >= 5 else ""
+                        )
+
+                        # Orden canónico de etapas según BITRIX_STAGE_COLORS
+                        # para que la leyenda / apilado tengan el orden que
+                        # el equipo espera (Pendiente de cotizar en la base,
+                        # Perdido arriba, etc.).
+                        _stage_order = [s for s in BITRIX_STAGE_COLORS.keys() if s in df_grouped["Etapa"].unique()]
+
                         fig_bitrix = px.bar(
                             df_grouped,
                             x="Tipo de máquina",
                             y="Cantidad",
                             color="Etapa",
+                            text="Etiqueta",
+                            custom_data=["Cantidad", "Porcentaje"],
                             title=f"Negociaciones por etapa - {mes_bitrix_legible}",
                             labels={"Etapa": "Etapa (Pipeline)", "Tipo de máquina": "Tipo de Máquina"},
-                            barmode="group",
-                            color_discrete_map=BITRIX_STAGE_COLORS
+                            barmode="stack",
+                            color_discrete_map=BITRIX_STAGE_COLORS,
+                            category_orders={"Etapa": _stage_order},
+                        )
+
+                        fig_bitrix.update_traces(
+                            textposition="inside",
+                            insidetextanchor="middle",
+                            textfont_size=12,
+                            hovertemplate=(
+                                "<b>%{x}</b><br>%{fullData.name}: "
+                                "%{customdata[0]} (%{customdata[1]:.1f}%)<extra></extra>"
+                            ),
                         )
 
                         fig_bitrix.update_layout(
                             xaxis_title="Tipo de Máquina",
                             yaxis_title="Cantidad de Negociaciones",
-                            legend_title_text="Etapa del Pipeline"
+                            legend_title_text="Etapa del Pipeline",
+                            uniformtext_minsize=10,
+                            uniformtext_mode="hide",
                         )
 
                         st.plotly_chart(fig_bitrix, width="stretch")
+
+                        # -------------------------------------------------
+                        # Tabla-resumen debajo del gráfico: una fila por
+                        # Tipo de máquina que aparece en el mes (no los 17
+                        # posibles) y una columna por cada Etapa presente,
+                        # con el conteo. Se suma columna "Total" al final.
+                        # Los headers de las columnas de etapa se pintan
+                        # con el color designado en BITRIX_STAGE_COLORS
+                        # (contraste de texto elegido por luminancia) y
+                        # las celdas con un tinte del mismo color al 12%.
+                        # -------------------------------------------------
+                        df_pivot = (
+                            df_bitrix_mes.groupby(["Tipo de máquina", "Etapa"]).size()
+                            .unstack("Etapa", fill_value=0)
+                        )
+                        # Reordenar columnas siguiendo el orden canónico
+                        # de BITRIX_STAGE_COLORS; cualquier etapa fuera de
+                        # ese mapa queda al final por si aparece algo nuevo.
+                        _etapas_ordenadas = [s for s in BITRIX_STAGE_COLORS.keys() if s in df_pivot.columns]
+                        _etapas_extra = [c for c in df_pivot.columns if c not in _etapas_ordenadas]
+                        df_pivot = df_pivot[_etapas_ordenadas + _etapas_extra]
+                        df_pivot["Total"] = df_pivot.sum(axis=1)
+                        # Ordenar filas por total descendente para que los
+                        # tipos con más negociaciones queden arriba.
+                        df_pivot = df_pivot.sort_values("Total", ascending=False).reset_index()
+
+                        def _texto_sobre(bg_hex: str) -> str:
+                            """Blanco o negro según luminancia del fondo,
+                            para asegurar contraste legible en el header."""
+                            h = str(bg_hex or "").lstrip("#")
+                            if len(h) != 6:
+                                return "#000000"
+                            try:
+                                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                            except ValueError:
+                                return "#000000"
+                            lum = 0.299 * r + 0.587 * g + 0.114 * b
+                            return "#000000" if lum > 140 else "#FFFFFF"
+
+                        def _estilo_header_pivot(col_name):
+                            if col_name in BITRIX_STAGE_COLORS:
+                                bg = BITRIX_STAGE_COLORS[col_name]
+                                fg = _texto_sobre(bg)
+                                return f"background-color: {bg}; color: {fg}; font-weight: 700;"
+                            if col_name == "Total":
+                                return "background-color: rgba(150,150,150,0.20); font-weight: 700;"
+                            return ""
+
+                        def _estilo_celda_pivot(col):
+                            """Tinte suave del color de la etapa en cada
+                            celda de esa columna. La columna 'Tipo de
+                            máquina' queda con fondo neutro; 'Total' con
+                            un gris para diferenciarla."""
+                            if col.name in BITRIX_STAGE_COLORS:
+                                fondo = hex_to_rgba(BITRIX_STAGE_COLORS[col.name], 0.12)
+                                return [
+                                    f"background-color: {fondo};" if v else ""
+                                    for v in col
+                                ]
+                            if col.name == "Total":
+                                return ["background-color: rgba(150,150,150,0.08); font-weight: 600;" for _ in col]
+                            return ["" for _ in col]
+
+                        df_pivot_styled = (
+                            df_pivot.style
+                            .map_index(_estilo_header_pivot, axis="columns")
+                            .apply(_estilo_celda_pivot, axis=0)
+                        )
+
+                        st.markdown("**Resumen por tipo de máquina y etapa**")
+                        st.dataframe(df_pivot_styled, width="stretch", hide_index=True)
 
                         st.subheader("Lista de negociaciones")
 
@@ -641,8 +804,8 @@ if spreadsheet_id and bitrix_webhook_url:
                             "Etapa": df_bitrix_mes["Etapa"].values,
                             "Teléfono": df_bitrix_mes["Telefono"].apply(format_phone_full).values,
                             "Tipo de máquina": df_bitrix_mes["Tipo de máquina"].values,
-                        })
-
+                            })
+                        
                         def estilo_fila_bitrix(row):
                             """
                             Colorea toda la fila según la etapa del negocio, a muy baja opacidad
