@@ -345,6 +345,36 @@ def persist_automatic_classifications(cambios, df_class_existente):
     return escritas
 
 
+def persist_enriched_sheets(df_sheets):
+    """
+    Reescribe el CACHE_SHEETS_FILE con el df_sheets ya enriquecido en
+    memoria (típicamente después de que apply_automatic_classifications()
+    haya sobreescrito 'Nombre' con el nombre oficial de Bitrix).
+
+    Motivación: sin esto, el enriquecimiento del Nombre vive solo en
+    memoria y se pierde entre reruns. Si Bitrix falla o tarda en la
+    próxima corrida, el reporte muestra 'None' donde antes veíamos el
+    nombre oficial y hay que recargar para que aparezca de nuevo.
+    Persistiendo el df ya enriquecido al CSV local, la próxima vez que
+    la cache se lea sin force_refresh, ya trae los Nombres de Bitrix
+    grabados y el reporte se ve completo aunque Bitrix esté caído.
+
+    - Idempotente: si el df no cambió, sobreescribe el CSV con el mismo
+      contenido (costo despreciable, escribe local, unos pocos MB).
+    - No lanza: si el disco/permiso falla, absorbe la excepción y
+      devuelve False, para que un problema de persistencia nunca rompa
+      la app en memoria (que ya tiene el df enriquecido igual).
+    - Devuelve True si escribió, False si el df era vacío o falló.
+    """
+    if df_sheets is None or df_sheets.empty:
+        return False
+    try:
+        df_sheets.to_csv(CACHE_SHEETS_FILE, index=False, encoding="utf-8-sig")
+        return True
+    except Exception:
+        return False
+
+
 def get_data_with_local_cache(sheet_id, sheet_name, webhook_url, force_refresh=False):
     """Carga datos locales (desde data/) o los reconstruye limpiamente si es necesario."""
     cache_valida = False
