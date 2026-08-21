@@ -206,6 +206,18 @@ if spreadsheet_id and bitrix_webhook_url:
 
     if not df_sheets.empty:
         df_class = get_saved_classifications()
+        # `persist_enriched_sheets` (más abajo) reescribe el CSV cache
+        # con el df ya enriquecido — que incluye la columna
+        # "Clasificacion_Manual" mergeada de la Sheet. En la próxima
+        # corrida `get_data_with_local_cache` la trae DE VUELTA en
+        # df_sheets, y si no la dropeamos antes del merge, pandas ve
+        # la columna en ambos lados y produce Clasificacion_Manual_x /
+        # _y, rompiendo el `df_sheets["Clasificacion_Manual"]` de
+        # abajo con KeyError. Este drop hace el ciclo idempotente
+        # sin perder la información — la fuente de verdad para la
+        # clasificación es siempre `df_class` (Google Sheet).
+        if "Clasificacion_Manual" in df_sheets.columns:
+            df_sheets = df_sheets.drop(columns=["Clasificacion_Manual"])
         df_sheets = pd.merge(df_sheets, df_class, on="Enlace de Whatsapp", how="left")
         df_sheets["Clasificacion_Manual"] = df_sheets["Clasificacion_Manual"].fillna("Pendiente")
 
