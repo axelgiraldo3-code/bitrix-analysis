@@ -17,6 +17,8 @@ __pycache__/
 data/*.csv
 !data/.gitkeep
 !data/clasificaciones_locales.csv
+!data/excluded_phones.json
+!data/codigos_area_argentina.json
 
 # Archivos de sistema operativo
 .DS_Store
