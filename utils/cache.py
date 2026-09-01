@@ -400,12 +400,12 @@ def _load_from_local_csvs():
     df_bitrix = pd.read_csv(CACHE_BITRIX_FILE)
 
     if "FechaHora" in df_sheets.columns:
-        # format="ISO8601" — el CSV ahora se serializa siempre en ISO porque
-        # google_sheets.py parsea a datetime antes de guardar. Pasar
-        # dayfirst=True acá disparaba UserWarning en pandas 2.x sobre strings
-        # ISO no ambiguas. ISO8601 acepta "2026-08-15", "2026-08-15 12:34:56"
-        # y "2026-08-15T12:34:56.789" sin warning.
-        df_sheets["FechaHora"] = pd.to_datetime(df_sheets["FechaHora"], errors="coerce", format="ISO8601")
+        # dayfirst=True es defensivo: si el CSV cacheado quedó con strings en
+        # formato DD/MM/AAAA (por una versión vieja de google_sheets.py que no
+        # ponía dayfirst), esto los re-parsea correctamente. No afecta a fechas
+        # ISO ya bien serializadas — solo dispara un UserWarning cosmético
+        # en pandas 2.x que no rompe nada.
+        df_sheets["FechaHora"] = pd.to_datetime(df_sheets["FechaHora"], errors="coerce", dayfirst=True)
         df_sheets["AñoMes"] = df_sheets["FechaHora"].dt.strftime("%Y-%m").fillna("Sin Fecha")
     if "DATE_CREATE" in df_bitrix.columns:
         df_bitrix["DATE_CREATE"] = pd.to_datetime(df_bitrix["DATE_CREATE"], errors="coerce")
