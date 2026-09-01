@@ -375,54 +375,120 @@ def persist_enriched_sheets(df_sheets):
         return False
 
 
+def _cache_files_look_valid():
+    """True si ambos CSVs existen y tienen los headers mínimos esperados.
+    Es una verificación barata (nrows=2) — no valida el contenido entero."""
+    if not (os.path.exists(CACHE_SHEETS_FILE) and os.path.exists(CACHE_BITRIX_FILE)):
+        return False
+    try:
+        s = pd.read_csv(CACHE_SHEETS_FILE, nrows=2)
+        b = pd.read_csv(CACHE_BITRIX_FILE, nrows=2)
+        return (
+            "FechaHora" in s.columns and "Telefono_Limpio" in s.columns
+            and "TITLE" in b.columns and "Etapa" in b.columns
+        )
+    except Exception:
+        return False
+
+
+def _load_from_local_csvs():
+    """Lee y normaliza tipos de los CSVs cacheados. Recalcula AñoMes en
+    ambos DFs para que un cache escrito por una versión vieja de la app
+    no arrastre valores incorrectos (bug histórico con fechas DD/MM/AAAA
+    que quedaban clasificadas en el mes equivocado)."""
+    df_sheets = pd.read_csv(CACHE_SHEETS_FILE)
+    df_bitrix = pd.read_csv(CACHE_BITRIX_FILE)
+
+    if "FechaHora" in df_sheets.columns:
+        df_sheets["FechaHora"] = pd.to_datetime(df_sheets["FechaHora"], errors="coerce", dayfirst=True)
+        df_sheets["AñoMes"] = df_sheets["FechaHora"].dt.strftime("%Y-%m").fillna("Sin Fecha")
+    if "DATE_CREATE" in df_bitrix.columns:
+        df_bitrix["DATE_CREATE"] = pd.to_datetime(df_bitrix["DATE_CREATE"], errors="coerce")
+        if "AñoMes" in df_bitrix.columns:
+            df_bitrix["AñoMes"] = df_bitrix["DATE_CREATE"].dt.strftime("%Y-%m").fillna("Sin Fecha")
+    return df_sheets, df_bitrix
+
+
 def get_data_with_local_cache(sheet_id, sheet_name, webhook_url, force_refresh=False):
-    """Carga datos locales (desde data/) o los reconstruye limpiamente si es necesario."""
-    cache_valida = False
+    """
+    Carga datos con fallback graceful al caché local cuando alguna API
+    (Sheets o Bitrix) está caída.
 
-    if os.path.exists(CACHE_SHEETS_FILE) and os.path.exists(CACHE_BITRIX_FILE) and not force_refresh:
+    Flujo:
+      1. Si NO hay force_refresh y el caché está sano → devuelve caché
+         sin tocar APIs (fast path habitual).
+      2. Si sí hay force_refresh o el caché no está sano → intenta
+         fetchar de las APIs. Cada API se llama de forma independiente
+         dentro de try/except para que la caída de una no arrastre a
+         la otra.
+      3. Para cada API que falló o devolvió vacío, se cae al CSV local
+         si existe y tiene los headers esperados; se emite `st.info`
+         diferenciado para que el usuario vea que está trabajando con
+         datos cacheados (posiblemente desactualizados).
+      4. Si TAMPOCO hay caché disponible para el que falló, ese df se
+         devuelve vacío y se muestra un `st.error` claro pidiendo
+         reintentar en unos minutos. La app entra al branch "df vacío"
+         de app.py y muestra el estado sin crashear.
+
+    El caché en disco solo se sobreescribe con datos frescos NO vacíos
+    — un fetch fallido nunca borra el caché existente.
+    """
+    cache_valida = _cache_files_look_valid()
+
+    # Fast path: caché sano y el usuario no pidió refresh explícito.
+    if cache_valida and not force_refresh:
+        return _load_from_local_csvs()
+
+    # Camino de fetch — cada API en su propio try/except.
+    df_sheets_new = pd.DataFrame()
+    df_bitrix_new = pd.DataFrame()
+    sheets_ok = False
+    bitrix_ok = False
+
+    with st.spinner("🔄 Conectando y actualizando datos desde Google Sheets y Bitrix24..."):
         try:
-            df_bitrix_check = pd.read_csv(CACHE_BITRIX_FILE, nrows=2)
-            df_sheets_check = pd.read_csv(CACHE_SHEETS_FILE, nrows=2)
-            bitrix_ok = "TITLE" in df_bitrix_check.columns and "Etapa" in df_bitrix_check.columns
-            sheets_ok = "FechaHora" in df_sheets_check.columns and "Telefono_Limpio" in df_sheets_check.columns
-            cache_valida = bitrix_ok and sheets_ok
-        except Exception:
-            cache_valida = False
+            df_sheets_new = load_google_sheets_data(sheet_id, sheet_name)
+            sheets_ok = not df_sheets_new.empty
+        except Exception as e:
+            st.warning(f"⚠️ Fetch de Google Sheets falló ({e}).")
+        try:
+            df_bitrix_new = load_bitrix_deals(webhook_url)
+            bitrix_ok = not df_bitrix_new.empty
+        except Exception as e:
+            st.warning(f"⚠️ Fetch de Bitrix24 falló ({e}).")
 
-    if cache_valida:
-        df_sheets = pd.read_csv(CACHE_SHEETS_FILE)
-        df_bitrix = pd.read_csv(CACHE_BITRIX_FILE)
+    # Persistir SOLO lo que llegó bien — un fetch fallido no debe
+    # sobreescribir el caché anterior con vacío.
+    if sheets_ok:
+        df_sheets_new.to_csv(CACHE_SHEETS_FILE, index=False, encoding="utf-8-sig")
+    if bitrix_ok:
+        df_bitrix_new.to_csv(CACHE_BITRIX_FILE, index=False, encoding="utf-8-sig")
 
-        if "FechaHora" in df_sheets.columns:
-            # dayfirst=True es defensivo: si el CSV cacheado quedó con strings en
-            # formato DD/MM/AAAA (por una versión vieja de google_sheets.py que no
-            # ponía dayfirst), esto los re-parsea correctamente. No afecta a fechas
-            # ISO ya bien serializadas.
-            df_sheets["FechaHora"] = pd.to_datetime(df_sheets["FechaHora"], errors="coerce", dayfirst=True)
-            # CRÍTICO: recalcular AñoMes desde la FechaHora recién parseada. Sin
-            # esto, si el CSV fue escrito por una versión vieja que producía
-            # AñoMes incorrecto (ej. "2026-12" para una fecha que en realidad es
-            # 12/agosto), el valor viejo sobrevive aunque FechaHora se corrija.
-            # Esto se manifestaba como filas con FechaHora=Aug 12 apareciendo bajo
-            # el filtro AñoMes=2026-12 en el desplegable de meses.
-            df_sheets["AñoMes"] = df_sheets["FechaHora"].dt.strftime("%Y-%m").fillna("Sin Fecha")
-        if "DATE_CREATE" in df_bitrix.columns:
-            # Bitrix devuelve siempre ISO con timezone, no necesita dayfirst.
-            df_bitrix["DATE_CREATE"] = pd.to_datetime(df_bitrix["DATE_CREATE"], errors="coerce")
-            if "AñoMes" in df_bitrix.columns:
-                # Mismo argumento que arriba, por consistencia.
-                df_bitrix["AñoMes"] = df_bitrix["DATE_CREATE"].dt.strftime("%Y-%m").fillna("Sin Fecha")
+    # Fallback: si algún fetch falló Y hay caché local, usarlo.
+    if (not sheets_ok or not bitrix_ok) and cache_valida:
+        cached_sheets, cached_bitrix = _load_from_local_csvs()
+        if not sheets_ok:
+            df_sheets_new = cached_sheets
+            st.info(
+                "ℹ️ Google Sheets no responde en este momento — "
+                "mostrando los últimos datos guardados en caché local. "
+                "Reintentá 'Actualizar Datos' en unos minutos."
+            )
+        if not bitrix_ok:
+            df_bitrix_new = cached_bitrix
+            st.info(
+                "ℹ️ Bitrix24 no responde en este momento — "
+                "mostrando los últimos datos guardados en caché local."
+            )
+    elif not sheets_ok and not bitrix_ok:
+        # Sin cache y sin APIs. La app va a mostrar el branch de df vacío.
+        st.error(
+            "❌ Las APIs de Google Sheets y Bitrix24 no responden y no "
+            "hay caché local disponible (probablemente es el primer "
+            "arranque después de un redeploy). Esperá unos minutos y "
+            "recargá la página, o tocá 'Actualizar Datos desde APIs'."
+        )
+    elif sheets_ok and bitrix_ok:
+        st.toast("⚡ Datos sincronizados y caché local reconstruida con éxito", icon="✅")
 
-        return df_sheets, df_bitrix
-    else:
-        with st.spinner("🔄 Conectando y actualizando datos desde Google Sheets y Bitrix24..."):
-            df_sheets = load_google_sheets_data(sheet_id, sheet_name)
-            df_bitrix = load_bitrix_deals(webhook_url)
-
-            if not df_sheets.empty:
-                df_sheets.to_csv(CACHE_SHEETS_FILE, index=False, encoding="utf-8-sig")
-            if not df_bitrix.empty:
-                df_bitrix.to_csv(CACHE_BITRIX_FILE, index=False, encoding="utf-8-sig")
-
-            st.toast("⚡ Datos sincronizados y caché local reconstruida con éxito", icon="✅")
-            return df_sheets, df_bitrix
+    return df_sheets_new, df_bitrix_new
