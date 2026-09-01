@@ -187,5 +187,13 @@ def load_google_sheets_data(sheet_id, sheet_name):
         return df
 
     except Exception as e:
-        st.error(f"Error al conectar con Google Sheets: {e}")
+        # NO usamos st.error acá para no duplicar mensajes: la capa
+        # `get_data_with_local_cache` en utils/cache.py ya emite un
+        # aviso claro cuando cae al caché local por API caída, y un
+        # st.error propio cuando no hay caché tampoco. Un st.error acá
+        # solo agregaría ruido visual encima del mensaje de fallback.
+        # El error igual queda registrado en los logs del contenedor
+        # (Streamlit escribe la excepción con su traceback), y el
+        # DataFrame vacío hace que la capa de arriba decida qué mostrar.
+        print(f"[google_sheets] Error al conectar: {e}")
         return pd.DataFrame()
