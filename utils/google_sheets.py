@@ -88,7 +88,12 @@ def deduplicate_bot_queries(df):
     return df_dedup
 
 
-@st.cache_data(ttl=1800)
+# max_entries=1 — Streamlit guarda una copia serializada del DF por cada
+# combinacion de (sheet_id, sheet_name) que llame a esta funcion. Sin limite,
+# reruns con distintos parametros (o el mismo re-hashing) acumulan copias en
+# RAM y en Streamlit Cloud Community (~1 GB) esto termina en OOM sin traceback.
+# Con max_entries=1 solo vive la version mas reciente.
+@st.cache_data(ttl=1800, max_entries=1)
 def load_google_sheets_data(sheet_id, sheet_name):
     """Carga los datos desde Google Sheets sanitizando los campos."""
     try:
