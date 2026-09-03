@@ -89,7 +89,7 @@ def is_argentina(phone) -> bool:
 
 
 # ---------------------------------------------------------
-# PIPELINE DE CARGA + ENRIQUECIMIENTO (CACHEADO)
+# PIPELINE DE CARGA + ENRIQUECIMIENTO (MEMOIZADO EN SESSION_STATE)
 # ---------------------------------------------------------
 # Antes, TODO este pipeline (fetch + merge de clasificaciones + auto-clasificación
 # con iterrows + persist a la Sheet + reescritura del CSV) se ejecutaba en cada
@@ -99,34 +99,54 @@ def is_argentina(phone) -> bool:
 # que interpretaba la falta de respuesta como "app caída" y mataba el proceso
 # (síntoma: "Oh no" al mover el selector de mes).
 #
-# La solución es cachear el pipeline completo con @st.cache_data. Los reruns
-# por interacción con widgets devuelven los DataFrames ya calculados al toque,
-# sin re-fetchar ni re-procesar nada. Solo se recorre el pipeline cuando:
-#   1) El usuario toca "Actualizar Datos desde APIs" (force_token cambia).
-#   2) El usuario guarda una clasificación manual (Tab 1 llama .clear() abajo).
-#
-# max_entries=1 evita que se acumulen versiones en RAM.
-@st.cache_data(ttl=1800, max_entries=1, show_spinner="🔄 Cargando y enriqueciendo datos...")
-def _load_and_enrich_pipeline(sheet_id, sheet_name, webhook_url, force_token):
+# La solución obvia sería @st.cache_data, pero adentro del pipeline hay `st.*`
+# calls (spinner, warning, info, error en get_data_with_local_cache) y un
+# @st.cache_data anidado en _fetch_classifications_records. Con Python 3.14
+# + Streamlit 1.63 el mecanismo de "replay de mensajes" del cache_data explota
+# con CacheReplayClosureError. Solución: memoizamos a mano en st.session_state.
+# Es cache por sesión (no compartido entre usuarios), lo cual está bien para
+# esta app y evita todo el replay machinery. Solo se recorre el pipeline cuando:
+#   1) El usuario toca "Actualizar Datos desde APIs" (btn_refresh dispara clear).
+#   2) El usuario guarda una clasificación manual (Tab 1 llama _invalidate).
+#   3) Cambian los parámetros de conexión (sheet_id, worksheet, webhook).
+
+_PIPELINE_STATE_KEY = "_pipeline_cached_result"
+
+
+def _invalidate_pipeline():
+    """Fuerza que el próximo llamado a _load_and_enrich_pipeline
+    recorra el pipeline entero. Usar al guardar una clasificación
+    (Tab 1) para que la nueva se refleje en la vista."""
+    st.session_state.pop(_PIPELINE_STATE_KEY, None)
+
+
+def _load_and_enrich_pipeline(sheet_id, sheet_name, webhook_url, force_refresh):
     """Corre el pipeline completo y devuelve (df_sheets, df_bitrix, escritas_auto).
 
-    `force_token`: string que discrimina llamadas frescas vs. cacheadas.
-    Al ser parte de la firma, cambiarlo (p.ej. "refresh" vs "cached")
-    invalida el hash del cache. Streamlit ya lo hace automáticamente por
-    args; usamos un string en vez del bool `btn_refresh` porque queda
-    más claro en el traceback y evita colisiones raras si en el futuro
-    agregamos otro flag booleano.
+    Si ya hay un resultado cacheado en session_state para los MISMOS args
+    de conexión y no se pidió force_refresh, lo devuelve al instante.
+    En caso contrario recorre el pipeline y lo cachea.
 
     Retorna la cantidad de clasificaciones automáticas escritas a la
     Sheet en ESTA corrida del pipeline (0 si fue cache hit o si no
     había nada para escribir).
     """
+    args_actuales = (sheet_id, sheet_name, webhook_url)
+
+    if not force_refresh and _PIPELINE_STATE_KEY in st.session_state:
+        cached = st.session_state[_PIPELINE_STATE_KEY]
+        if cached.get("args") == args_actuales:
+            return cached["result"]
+
+    # --- Cache miss: recorrer el pipeline ---
     df_sheets_local, df_bitrix_local = get_data_with_local_cache(
         sheet_id, sheet_name, webhook_url,
-        force_refresh=(force_token == "refresh")
+        force_refresh=force_refresh
     )
     if df_sheets_local.empty:
-        return df_sheets_local, df_bitrix_local, 0
+        result = (df_sheets_local, df_bitrix_local, 0)
+        st.session_state[_PIPELINE_STATE_KEY] = {"args": args_actuales, "result": result}
+        return result
 
     df_class_local = get_saved_classifications()
 
@@ -146,9 +166,9 @@ def _load_and_enrich_pipeline(sheet_id, sheet_name, webhook_url, force_token):
         df_sheets_local["Clasificacion_Manual"].fillna("Pendiente")
     )
 
-    # Aplicar automatizaciones + persistir todo en el mismo bloque
-    # cacheado. Antes esto vivía fuera del cache y corría en cada
-    # rerun; moverlo adentro es lo que elimina el bloqueo del proceso.
+    # Aplicar automatizaciones + persistir. El paso de auto-clasificación
+    # con iterrows era el más pesado y el que bloqueaba el healthcheck en
+    # cada rerun; memoizándolo solo corre una vez por sesión.
     df_sheets_local, auto_cambios_local = apply_automatic_classifications(
         df_sheets_local, df_bitrix_local
     )
@@ -162,14 +182,17 @@ def _load_and_enrich_pipeline(sheet_id, sheet_name, webhook_url, force_token):
         # Nunca dejamos que un fallo de escritura a la Sheet rompa la
         # carga: la sesión sigue usando las clasificaciones aplicadas
         # en memoria y se avisa por el sidebar en el bloque de abajo.
-        # Guardamos la excepción en session_state para mostrarla afuera.
-        st.session_state["_persist_auto_error"] = str(e)
+        st.sidebar.warning(
+            f"No se pudieron persistir las clasificaciones automáticas ({e})."
+        )
 
     # Persistir el df ya enriquecido al CSV local para que la próxima
     # corrida arranque con los nombres oficiales de Bitrix cargados.
     persist_enriched_sheets(df_sheets_local)
 
-    return df_sheets_local, df_bitrix_local, escritas_local
+    result = (df_sheets_local, df_bitrix_local, escritas_local)
+    st.session_state[_PIPELINE_STATE_KEY] = {"args": args_actuales, "result": result}
+    return result
 
 
 # ---------------------------------------------------------
@@ -281,33 +304,19 @@ with st.sidebar.expander("📵 Números Excluidos de Reportes", expanded=False):
 # CARGA Y DESPLIEGUE PRINCIPAL
 # ---------------------------------------------------------
 if spreadsheet_id and bitrix_webhook_url:
-    # Un string en vez del bool `btn_refresh` — así queda visible en
-    # el traceback qué causó la corrida y el hash del cache es más
-    # legible en el panel de Streamlit ("cached" vs "refresh").
-    _force_token = "refresh" if btn_refresh else "cached"
-
     df_sheets, df_bitrix, _escritas_auto = _load_and_enrich_pipeline(
-        spreadsheet_id, worksheet_name, bitrix_webhook_url, _force_token
+        spreadsheet_id, worksheet_name, bitrix_webhook_url,
+        force_refresh=btn_refresh,
     )
 
-    # Mostrar avisos de la corrida SOLO la primera vez que se vean en
-    # esta sesión (comparando el count con el marker en session_state).
-    # Sin este gate, con cache hit Streamlit devolvería el mismo count
-    # en cada rerun y el toast fluiría spam.
+    # Toast solo la primera vez que se ve un count nuevo en esta sesión,
+    # para no repetir en cada rerun con cache hit.
     _last_toast_key = "_last_auto_toast_count"
     if _escritas_auto and st.session_state.get(_last_toast_key) != _escritas_auto:
         st.session_state[_last_toast_key] = _escritas_auto
         st.toast(
             f"📝 {_escritas_auto} clasificación(es) automática(s) registrada(s) en la Sheet.",
             icon="⚡",
-        )
-
-    # Error de persistencia asincrónico capturado dentro del pipeline
-    # cacheado. Lo mostramos y limpiamos para que no reaparezca.
-    if "_persist_auto_error" in st.session_state:
-        st.sidebar.warning(
-            f"No se pudieron persistir las clasificaciones automáticas "
-            f"({st.session_state.pop('_persist_auto_error')})."
         )
 
     if not df_sheets.empty:
@@ -485,11 +494,11 @@ if spreadsheet_id and bitrix_webhook_url:
 
                                 # Invalidar el cache del pipeline para que el próximo
                                 # rerun refleje la clasificación recién guardada. Sin
-                                # este .clear() la app seguiría mostrando la versión
+                                # esta invalidación la app seguiría mostrando la versión
                                 # cacheada (con "Pendiente") hasta el próximo refresh
                                 # explícito, y el auto-avance abajo no tendría efecto
                                 # visible.
-                                _load_and_enrich_pipeline.clear()
+                                _invalidate_pipeline()
 
                                 # En vez de volver al inicio de la lista, se avanza
                                 # automáticamente al próximo contacto "Pendiente": primero
