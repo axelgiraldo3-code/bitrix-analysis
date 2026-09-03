@@ -89,6 +89,90 @@ def is_argentina(phone) -> bool:
 
 
 # ---------------------------------------------------------
+# PIPELINE DE CARGA + ENRIQUECIMIENTO (CACHEADO)
+# ---------------------------------------------------------
+# Antes, TODO este pipeline (fetch + merge de clasificaciones + auto-clasificación
+# con iterrows + persist a la Sheet + reescritura del CSV) se ejecutaba en cada
+# rerun de Streamlit — o sea, cada vez que el usuario tocaba CUALQUIER widget
+# (cambiar de mes, cambiar de tab, tipear en el sidebar). En Streamlit Cloud
+# Community esto tardaba varios segundos por rerun y bloqueaba el healthcheck,
+# que interpretaba la falta de respuesta como "app caída" y mataba el proceso
+# (síntoma: "Oh no" al mover el selector de mes).
+#
+# La solución es cachear el pipeline completo con @st.cache_data. Los reruns
+# por interacción con widgets devuelven los DataFrames ya calculados al toque,
+# sin re-fetchar ni re-procesar nada. Solo se recorre el pipeline cuando:
+#   1) El usuario toca "Actualizar Datos desde APIs" (force_token cambia).
+#   2) El usuario guarda una clasificación manual (Tab 1 llama .clear() abajo).
+#
+# max_entries=1 evita que se acumulen versiones en RAM.
+@st.cache_data(ttl=1800, max_entries=1, show_spinner="🔄 Cargando y enriqueciendo datos...")
+def _load_and_enrich_pipeline(sheet_id, sheet_name, webhook_url, force_token):
+    """Corre el pipeline completo y devuelve (df_sheets, df_bitrix, escritas_auto).
+
+    `force_token`: string que discrimina llamadas frescas vs. cacheadas.
+    Al ser parte de la firma, cambiarlo (p.ej. "refresh" vs "cached")
+    invalida el hash del cache. Streamlit ya lo hace automáticamente por
+    args; usamos un string en vez del bool `btn_refresh` porque queda
+    más claro en el traceback y evita colisiones raras si en el futuro
+    agregamos otro flag booleano.
+
+    Retorna la cantidad de clasificaciones automáticas escritas a la
+    Sheet en ESTA corrida del pipeline (0 si fue cache hit o si no
+    había nada para escribir).
+    """
+    df_sheets_local, df_bitrix_local = get_data_with_local_cache(
+        sheet_id, sheet_name, webhook_url,
+        force_refresh=(force_token == "refresh")
+    )
+    if df_sheets_local.empty:
+        return df_sheets_local, df_bitrix_local, 0
+
+    df_class_local = get_saved_classifications()
+
+    # `persist_enriched_sheets` reescribe el CSV cache con el df
+    # enriquecido — que incluye la columna "Clasificacion_Manual"
+    # mergeada. En la próxima corrida `get_data_with_local_cache` la
+    # trae DE VUELTA en df_sheets, y si no la dropeamos antes del
+    # merge, pandas produce _x/_y y rompe la lectura de la columna.
+    # Este drop hace el ciclo idempotente sin perder información — la
+    # fuente de verdad es siempre `df_class` (Google Sheet).
+    if "Clasificacion_Manual" in df_sheets_local.columns:
+        df_sheets_local = df_sheets_local.drop(columns=["Clasificacion_Manual"])
+    df_sheets_local = pd.merge(
+        df_sheets_local, df_class_local, on="Enlace de Whatsapp", how="left"
+    )
+    df_sheets_local["Clasificacion_Manual"] = (
+        df_sheets_local["Clasificacion_Manual"].fillna("Pendiente")
+    )
+
+    # Aplicar automatizaciones + persistir todo en el mismo bloque
+    # cacheado. Antes esto vivía fuera del cache y corría en cada
+    # rerun; moverlo adentro es lo que elimina el bloqueo del proceso.
+    df_sheets_local, auto_cambios_local = apply_automatic_classifications(
+        df_sheets_local, df_bitrix_local
+    )
+
+    escritas_local = 0
+    try:
+        escritas_local = persist_automatic_classifications(
+            auto_cambios_local, df_class_local
+        )
+    except Exception as e:
+        # Nunca dejamos que un fallo de escritura a la Sheet rompa la
+        # carga: la sesión sigue usando las clasificaciones aplicadas
+        # en memoria y se avisa por el sidebar en el bloque de abajo.
+        # Guardamos la excepción en session_state para mostrarla afuera.
+        st.session_state["_persist_auto_error"] = str(e)
+
+    # Persistir el df ya enriquecido al CSV local para que la próxima
+    # corrida arranque con los nombres oficiales de Bitrix cargados.
+    persist_enriched_sheets(df_sheets_local)
+
+    return df_sheets_local, df_bitrix_local, escritas_local
+
+
+# ---------------------------------------------------------
 # CONFIGURACIÓN DE PÁGINA Y ESTILOS
 # ---------------------------------------------------------
 st.set_page_config(
@@ -197,60 +281,36 @@ with st.sidebar.expander("📵 Números Excluidos de Reportes", expanded=False):
 # CARGA Y DESPLIEGUE PRINCIPAL
 # ---------------------------------------------------------
 if spreadsheet_id and bitrix_webhook_url:
-    df_sheets, df_bitrix = get_data_with_local_cache(
-        spreadsheet_id,
-        worksheet_name,
-        bitrix_webhook_url,
-        force_refresh=btn_refresh
+    # Un string en vez del bool `btn_refresh` — así queda visible en
+    # el traceback qué causó la corrida y el hash del cache es más
+    # legible en el panel de Streamlit ("cached" vs "refresh").
+    _force_token = "refresh" if btn_refresh else "cached"
+
+    df_sheets, df_bitrix, _escritas_auto = _load_and_enrich_pipeline(
+        spreadsheet_id, worksheet_name, bitrix_webhook_url, _force_token
     )
 
+    # Mostrar avisos de la corrida SOLO la primera vez que se vean en
+    # esta sesión (comparando el count con el marker en session_state).
+    # Sin este gate, con cache hit Streamlit devolvería el mismo count
+    # en cada rerun y el toast fluiría spam.
+    _last_toast_key = "_last_auto_toast_count"
+    if _escritas_auto and st.session_state.get(_last_toast_key) != _escritas_auto:
+        st.session_state[_last_toast_key] = _escritas_auto
+        st.toast(
+            f"📝 {_escritas_auto} clasificación(es) automática(s) registrada(s) en la Sheet.",
+            icon="⚡",
+        )
+
+    # Error de persistencia asincrónico capturado dentro del pipeline
+    # cacheado. Lo mostramos y limpiamos para que no reaparezca.
+    if "_persist_auto_error" in st.session_state:
+        st.sidebar.warning(
+            f"No se pudieron persistir las clasificaciones automáticas "
+            f"({st.session_state.pop('_persist_auto_error')})."
+        )
+
     if not df_sheets.empty:
-        df_class = get_saved_classifications()
-        # `persist_enriched_sheets` (más abajo) reescribe el CSV cache
-        # con el df ya enriquecido — que incluye la columna
-        # "Clasificacion_Manual" mergeada de la Sheet. En la próxima
-        # corrida `get_data_with_local_cache` la trae DE VUELTA en
-        # df_sheets, y si no la dropeamos antes del merge, pandas ve
-        # la columna en ambos lados y produce Clasificacion_Manual_x /
-        # _y, rompiendo el `df_sheets["Clasificacion_Manual"]` de
-        # abajo con KeyError. Este drop hace el ciclo idempotente
-        # sin perder la información — la fuente de verdad para la
-        # clasificación es siempre `df_class` (Google Sheet).
-        if "Clasificacion_Manual" in df_sheets.columns:
-            df_sheets = df_sheets.drop(columns=["Clasificacion_Manual"])
-        df_sheets = pd.merge(df_sheets, df_class, on="Enlace de Whatsapp", how="left")
-        df_sheets["Clasificacion_Manual"] = df_sheets["Clasificacion_Manual"].fillna("Pendiente")
-
-        # Aplicar automatizaciones integradas. Devuelve además la lista de
-        # clasificaciones que la función derivó automáticamente en esta corrida,
-        # para que las podamos persistir en la Sheet (columna Usuario = 'auto (...)').
-        # Así el registro de la Sheet refleja también las clasificaciones automáticas
-        # y no solo las manuales.
-        df_sheets, auto_cambios = apply_automatic_classifications(df_sheets, df_bitrix)
-
-        # Persistir en la Sheet solo lo que no esté ya registrado con el mismo valor.
-        # Esto es idempotente: en el primer arranque escribe todo lo acumulado, en
-        # los siguientes es no-op (0 escrituras).
-        try:
-            escritas = persist_automatic_classifications(auto_cambios, df_class)
-            if escritas:
-                st.toast(f"📝 {escritas} clasificación(es) automática(s) registrada(s) en la Sheet.", icon="⚡")
-        except Exception as e:
-            # No queremos que un fallo de persistencia impida usar la app: se muestra
-            # el error en el sidebar y seguimos con las clasificaciones aplicadas
-            # solo en memoria (comportamiento anterior).
-            st.sidebar.warning(f"No se pudieron persistir las clasificaciones automáticas ({e}).")
-
-        # Persistir el df_sheets YA ENRIQUECIDO al CSV local. El
-        # apply_automatic_classifications() de arriba sobreescribe la
-        # columna "Nombre" con el nombre oficial de Bitrix cuando hay
-        # match por teléfono; sin esta línea ese enriquecimiento solo
-        # vive en memoria y se pierde entre reruns / reloads del
-        # navegador. Al escribirlo al CSV, la próxima corrida (sin
-        # force_refresh) ya trae los nombres de Bitrix grabados y el
-        # reporte se ve completo aunque en ese momento Bitrix esté
-        # caído o tarde en responder. No lanza si el disco falla.
-        persist_enriched_sheets(df_sheets)
 
         tab_clasif, tab_reporte_sheets, tab_bitrix = st.tabs([
             "Clasificación Manual (Contacto por Contacto)",
@@ -290,7 +350,7 @@ if spreadsheet_id and bitrix_webhook_url:
                         raw_tel = row.get("Telefono_Limpio", "")
                         # Limpieza del float (.0) y caracteres no numéricos
                         tel = re.sub(r"\D", "", str(raw_tel).split(".")[0]) if pd.notna(raw_tel) else ""
-                        
+
                         tel_display = format_phone_ar(tel) if tel else str(row.get("Enlace de Whatsapp", "Sin Teléfono"))
 
                         nombre = str(row.get("Nombre", "")).strip()
@@ -422,6 +482,14 @@ if spreadsheet_id and bitrix_webhook_url:
                             if btn_guardar:
                                 save_classification(contacto["Enlace de Whatsapp"], nueva_clasif)
                                 st.success(f"¡Guardado correctamente como **{nueva_clasif}**!")
+
+                                # Invalidar el cache del pipeline para que el próximo
+                                # rerun refleje la clasificación recién guardada. Sin
+                                # este .clear() la app seguiría mostrando la versión
+                                # cacheada (con "Pendiente") hasta el próximo refresh
+                                # explícito, y el auto-avance abajo no tendría efecto
+                                # visible.
+                                _load_and_enrich_pipeline.clear()
 
                                 # En vez de volver al inicio de la lista, se avanza
                                 # automáticamente al próximo contacto "Pendiente": primero
@@ -817,7 +885,7 @@ if spreadsheet_id and bitrix_webhook_url:
                             "Teléfono": df_bitrix_mes["Telefono"].apply(format_phone_full).values,
                             "Tipo de máquina": df_bitrix_mes["Tipo de máquina"].values,
                             })
-                        
+
                         def estilo_fila_bitrix(row):
                             """
                             Colorea toda la fila según la etapa del negocio, a muy baja opacidad
