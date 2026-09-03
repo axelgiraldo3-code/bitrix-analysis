@@ -88,7 +88,9 @@ def get_bitrix_stage_names(webhook_url):
     return stages_dict
 
 
-@st.cache_data(ttl=1800)
+# max_entries=1 — misma logica que en google_sheets.py: cap del cache a
+# UNA sola copia para no acumular DFs en RAM entre reruns y disparar OOM.
+@st.cache_data(ttl=1800, max_entries=1)
 def load_bitrix_deals(webhook_url):
     """
     Extrae negociaciones de Bitrix24, filtra TYPE_ID == 'SALE',
