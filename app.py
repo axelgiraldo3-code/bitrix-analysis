@@ -12,7 +12,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from utils import bitrix, cache, sheets
+from utils import bitrix, cache, pending, sheets
 from utils.styling import style_bitrix_table, style_bot_table
 from utils.branding import (
     BITRIX_STAGE_COLORS,
@@ -45,6 +45,26 @@ st.markdown(
 )
 
 st.title("COTEAR — Panel de consultas y negociaciones")
+
+
+# --- Recuperación de cola pendiente desde disco (una vez por sesión) ---------
+_recovered = pending.load_from_disk_once()
+if _recovered:
+    with st.container(border=True):
+        st.warning(
+            f"Se encontraron **{len(_recovered)} cambios sin sincronizar** "
+            "de una sesión anterior. Revisá y decidí qué hacer."
+        )
+        st.dataframe(pending.as_dataframe(), hide_index=True, width="stretch")
+        rc1, rc2, rc3 = st.columns([1, 1, 4])
+        with rc1:
+            if st.button("Mantener en cola", type="primary",
+                         key="pending_recover_keep"):
+                st.rerun()
+        with rc2:
+            if st.button("Descartar todo", key="pending_recover_discard"):
+                pending.clear()
+                st.rerun()
 
 
 # -----------------------------------------------------------------------------
@@ -115,22 +135,25 @@ def build_processed(bot_df: pd.DataFrame, bitrix_df: pd.DataFrame) -> pd.DataFra
 
 
 def apply_persisted(df: pd.DataFrame, year_month: str) -> pd.DataFrame:
-    """Realimenta el df del mes con las clasificaciones ya guardadas en la hoja.
+    """Realimenta el df del mes con las clasificaciones guardadas en la hoja
+    y luego con la cola de cambios pendientes (session_state).
 
     Sólo lee la pestaña del mes en foco → 1 read en vez de N.
+    La cola pendiente pisa a lo persistido (optimistic UI).
     """
     try:
         persisted = sheets.load_persisted_classifications(year_month)
     except Exception as e:
         st.warning(f"No se pudo leer la hoja del mes {year_month}: {e}")
-        return df
-    if not persisted:
-        return df
+        persisted = {}
     out = df.copy()
-    for i in out.index:
-        num = str(out.at[i, "Numero"])
-        if num in persisted and persisted[num]:
-            out.at[i, "Clasificacion interna"] = persisted[num]
+    if persisted:
+        for i in out.index:
+            num = str(out.at[i, "Numero"])
+            if num in persisted and persisted[num]:
+                out.at[i, "Clasificacion interna"] = persisted[num]
+    # Overlay de cambios en cola (aún no sincronizados a Sheets)
+    out = pending.apply_to_df(out)
     return out
 
 
@@ -169,6 +192,59 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
+    # --- Cola de cambios pendientes -----------------------------------------
+    st.divider()
+    st.subheader("Cambios pendientes")
+    _pending_count = pending.count()
+    if _pending_count == 0:
+        st.caption("Sin cambios en cola.")
+    else:
+        st.markdown(
+            f"<div style='padding:6px 10px;border-radius:6px;"
+            f"background:{COTEAR_BLUE};color:white;display:inline-block;"
+            f"font-weight:700;'>{_pending_count} pendientes</div>",
+            unsafe_allow_html=True,
+        )
+        with st.expander("Ver pendientes"):
+            st.dataframe(pending.as_dataframe(), hide_index=True, width="stretch")
+
+        sync_col, disc_col = st.columns(2)
+        with sync_col:
+            if st.button("⬆️ Sincronizar", type="primary", key="pending_sync"):
+                items = list(pending.get().items())
+                rows = [
+                    {
+                        "Fecha": v.get("Fecha", ""),
+                        "Numero": num,
+                        "Nombre": v.get("Nombre", ""),
+                        "Clasificacion interna": v.get("Clasificacion interna", ""),
+                    }
+                    for num, v in items
+                ]
+                try:
+                    # Agrupar por mes derivado de la Fecha (DD-MM-YY)
+                    from collections import defaultdict
+                    by_month: dict[str, list[dict]] = defaultdict(list)
+                    for r in rows:
+                        f = str(r.get("Fecha", ""))
+                        try:
+                            d = datetime.strptime(f, "%d-%m-%y")
+                            ym = f"{d.year:04d}-{d.month:02d}"
+                        except ValueError:
+                            ym = selected_month  # fallback al mes en foco
+                        by_month[ym].append(r)
+                    for ym, rs in by_month.items():
+                        sheets.batch_upsert_bot_rows(ym, rs, key_col="Numero")
+                    pending.clear()
+                    st.success(f"Sincronizados {len(rows)} cambios.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al sincronizar (la cola queda intacta): {e}")
+        with disc_col:
+            if st.button("🗑️ Descartar", key="pending_discard"):
+                pending.clear()
+                st.rerun()
+
 # Bitrix del mes seleccionado (snapshot-first con TTL 7 días)
 bitrix_df, bitrix_source = load_bitrix_month(selected_month, force_refresh=force_refresh)
 if force_refresh:
@@ -205,111 +281,121 @@ _sync_month_once(selected_month, _snapshot_key)
 # Tabs
 # -----------------------------------------------------------------------------
 tab1, tab2, tab3 = st.tabs([
-    "🗂️ Clasificación manual",
-    "📈 Extracto mensual",
-    "🤝 Análisis Bitrix24",
+    "Clasificación manual",
+    "Extracto mensual",
+    "Análisis Bitrix24",
 ])
 
 
 # =============================================================================
 # TAB 1 — Clasificación manual
 # =============================================================================
-with tab1:
+@st.fragment
+def _tab1_body(month_df: pd.DataFrame, year_month: str) -> None:
+    """Renderiza el Tab 1 dentro de un fragmento: los reruns por selección
+    de fila, cambio de selectbox o guardado NO re-ejecutan los tabs 2 y 3."""
     st.subheader("Clasificación manual de reportes")
-    month_df = cache.filter_by_year_month(processed, selected_month).copy()
     if month_df.empty:
         st.info("Sin reportes en el mes seleccionado.")
-    else:
-        # Tabla de selección con la clasificación como columna al final
-        # (coloreada por su valor). Un click en la fila la selecciona.
-        st.caption("Seleccioná un contacto para clasificar")
+        return
 
-        picker_cols = ["Fecha", "Nombre", "Numero", "Area de interes",
-                       "Clasificacion interna"]
-        picker_df = month_df[picker_cols].copy()
-        picker_df["Nombre"] = picker_df["Nombre"].replace("", "(sin nombre)")
+    # Tabla de selección con la clasificación como columna al final
+    # (coloreada por su valor). Un click en la fila la selecciona.
+    st.caption("Seleccioná un contacto para clasificar")
 
-        # CSS: última columna (clasificación) alineada a la derecha, en gris
-        # oscuro cursiva y fuente más chica cuando se ve como texto de la fila.
-        st.markdown(
-            """
-            <style>
-              /* Alineación derecha + estilo etiqueta para la última columna
-                 de la tabla de selección (Clasificacion interna). */
-              div[data-testid="stDataFrame"] table td:last-child,
-              div[data-testid="stDataFrame"] table th:last-child {
-                text-align: right !important;
-                font-style: italic;
-                font-size: 0.85rem;
-                color: #4a4a4a;
-              }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
+    picker_cols = ["Fecha", "Nombre", "Numero", "Area de interes",
+                   "Clasificacion interna"]
+    picker_df = month_df[picker_cols].copy()
+    picker_df["Nombre"] = picker_df["Nombre"].replace("", "(sin nombre)")
 
-        event = st.dataframe(
-            style_bot_table(picker_df),
-            hide_index=True,
-            width="stretch",
-            height=min(38 * (len(picker_df) + 1) + 3, 420),
-            on_select="rerun",
-            selection_mode="single-row",
-            key="picker_table",
-        )
-        sel_rows = event.selection.rows if event.selection else []
-        if not sel_rows:
-            st.info("Elegí una fila de la tabla para ver el detalle.")
-            st.stop()
-        idx = sel_rows[0]
-        row = month_df.iloc[idx]
+    # CSS: última columna (clasificación) alineada a la derecha, en gris
+    # oscuro cursiva y fuente más chica cuando se ve como texto de la fila.
+    st.markdown(
+        """
+        <style>
+          /* Alineación derecha + estilo etiqueta para la última columna
+             de la tabla de selección (Clasificacion interna). */
+          div[data-testid="stDataFrame"] table td:last-child,
+          div[data-testid="stDataFrame"] table th:last-child {
+            text-align: right !important;
+            font-style: italic;
+            font-size: 0.85rem;
+            color: #4a4a4a;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        st.markdown(
-            f"""
-            | Número | Nombre | Fecha | Área de interés |
-            |---|---|---|---|
-            | {row['Numero']} | {row['Nombre'] or '—'} | {row['Fecha']} | {row['Area de interes'] or '—'} |
-            """
-        )
-        st.markdown("**Resumen de la consulta**")
-        st.text_area(
-            "Resumen",
-            value=row["Resumen general"],
-            height=220,
-            label_visibility="collapsed",
-            disabled=True,
-        )
+    event = st.dataframe(
+        style_bot_table(picker_df),
+        hide_index=True,
+        width="stretch",
+        height=min(38 * (len(picker_df) + 1) + 3, 420),
+        on_select="rerun",
+        selection_mode="single-row",
+        key="picker_table",
+    )
+    sel_rows = event.selection.rows if event.selection else []
+    if not sel_rows:
+        st.info("Elegí una fila de la tabla para ver el detalle.")
+        return
 
-        current_class = row["Clasificacion interna"] or CLASSIFICATION_OPTIONS[-1]
-        try:
-            default_idx = CLASSIFICATION_OPTIONS.index(current_class)
-        except ValueError:
-            default_idx = CLASSIFICATION_OPTIONS.index("SIN CLASIFICAR")
-        new_class = st.selectbox(
-            "Clasificación interna",
-            CLASSIFICATION_OPTIONS,
-            index=default_idx,
-        )
+    idx = sel_rows[0]
+    row = month_df.iloc[idx]
 
-        col_a, col_b = st.columns([1, 3])
-        with col_a:
-            if st.button("💾 Guardar clasificación", type="primary"):
-                try:
-                    payload = {
-                        "Fecha": row["Fecha"],
-                        "Numero": row["Numero"],
-                        "Nombre": row["Nombre"],
-                        "Clasificacion interna": new_class,
-                    }
-                    sheets.upsert_bot_row(selected_month, payload, key_col="Numero")
-                    # Invalidar sólo lo estrictamente necesario:
-                    # - La caché del mes en la hoja (ya se invalida dentro de sheets)
-                    # - El sync (para que la próxima recarga vuelva a decidir si sincroniza)
-                    _sync_month_once.clear()
-                    st.success("Clasificación guardada.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+    st.markdown(
+        f"""
+        | Número | Nombre | Fecha | Área de interés |
+        |---|---|---|---|
+        | {row['Numero']} | {row['Nombre'] or '—'} | {row['Fecha']} | {row['Area de interes'] or '—'} |
+        """
+    )
+    st.markdown("**Resumen de la consulta**")
+    st.text_area(
+        "Resumen",
+        value=row["Resumen general"],
+        height=220,
+        label_visibility="collapsed",
+        disabled=True,
+    )
+
+    current_class = row["Clasificacion interna"] or CLASSIFICATION_OPTIONS[-1]
+    try:
+        default_idx = CLASSIFICATION_OPTIONS.index(current_class)
+    except ValueError:
+        default_idx = CLASSIFICATION_OPTIONS.index("SIN CLASIFICAR")
+    new_class = st.selectbox(
+        "Clasificación interna",
+        CLASSIFICATION_OPTIONS,
+        index=default_idx,
+    )
+
+    col_a, col_b = st.columns([1, 3])
+    with col_a:
+        if st.button("💾 Guardar clasificación", type="primary"):
+            # No golpeamos Sheets: encolamos el cambio. La UI ya refleja el
+            # valor porque apply_persisted() overlaya la cola en el próximo rerun.
+            pending.add(str(row["Numero"]), {
+                "Fecha": row["Fecha"],
+                "Nombre": row["Nombre"],
+                "Clasificacion interna": new_class,
+            })
+            st.toast(f"En cola: {row['Numero']} → {new_class}", icon="📥")
+            st.rerun(scope="app")
+    with col_b:
+        num_key = str(row["Numero"])
+        if num_key in pending.get():
+            if st.button("↩️ Quitar de la cola", key=f"unqueue_{num_key}"):
+                pending.remove([num_key])
+                st.rerun(scope="app")
+
+
+with tab1:
+    _tab1_body(
+        cache.filter_by_year_month(processed, selected_month).copy(),
+        selected_month,
+    )
 
 
 # =============================================================================
@@ -335,7 +421,7 @@ with tab2:
                 color_discrete_map=CLASSIFICATION_COLORS,
                 hole=0.35,
             )
-            fig.update_traces(textposition="inside", textinfo="percent+label")
+            # fig.update_traces(textposition="inside", textinfo="percent+label")
             fig.update_layout(
                 showlegend=True,
                 height=460,
@@ -476,10 +562,12 @@ with tab3:
             # KPIs rápidos
             total = len(b_month)
             nuevos = (b_month["Nuevo"].astype(str) == "Sí").sum()
-            k1, k2, k3 = st.columns(3)
+            perdidos = (b_month["Etapa"].astype(str) == "Cerrado Perdido").sum() + (b_month["Etapa"].astype(str) == "Cerrado Perdido, motivo?").sum()
+            k1, k2, k3, k4 = st.columns(4)
             k1.metric("Total con actividad", total)
             k2.metric("Nuevos del mes", int(nuevos))
             k3.metric("Reactivados / movidos", total - int(nuevos))
+            k4.metric("Cerrados",perdidos)
 
             listing = b_month[[
                 "Nuevo", "Fecha movimiento", "Fecha creacion", "Nombre negocio",
