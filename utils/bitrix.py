@@ -1,216 +1,439 @@
-"""
-Módulo de integración con Bitrix24: extracción de negociaciones (deals),
-resolución de contactos/compañías y nombres de etapas, todo vía el webhook
-REST configurado en la app.
-"""
+"""Cliente REST para la API de Bitrix24 (Webhook entrante)."""
+from __future__ import annotations
 
-import requests
-from requests.adapters import HTTPAdapter, Retry
+import time
+from typing import Any, Optional
+
 import pandas as pd
+import requests
 import streamlit as st
 
-from .helpers import sanitize_text
-from .config import STAGE_MAP_BACKUP
+from .machinery import classify_machinery
+from .phone_ar import format_ar, significant_ar
+
+# Rate limit: 2 req/sec según Bitrix. Usamos 0.5s entre llamadas.
+_RATE_SLEEP = 0.5
 
 
-def _build_bitrix_session():
+# Normalización de nombres de etapa que llegan desde Bitrix (sin tildes, con
+# capitalización inconsistente, o con sufijos como ", motivo?") a los nombres
+# canónicos usados en branding.py (BITRIX_STAGE_ORDER / BITRIX_STAGE_COLORS).
+# Sin esto los colores del gráfico caen a la paleta default de Plotly.
+STAGE_NAME_NORMALIZE = {
+    "Cotizado aguardando devolucion": "Cotizado aguardando devolución",
+    "En negociacion":                 "En negociación",
+    "En Negociacion":                 "En negociación",
+    "Ganado en desarrollo":           "Ganado en Desarrollo",
+    "Cerrado Perdido, motivo?":       "Cerrado Perdido",
+}
+
+
+# Mapa hardcodeado del pipeline de VENTA DE MÁQUINAS (CATEGORY_ID=0) según
+# el portal de Cotear. Se usa como fallback si `fetch_stage_map()` falla.
+STAGE_NAME_ALIASES = {
+    # Pipeline 0 - Ventas de máquinas
+    "UC_U0Q3CX":          "Pendiente de cotizar",
+    "NEW":                "Cotizado aguardando devolución",
+    "PREPAYMENT_INVOICE": "En negociación",
+    "EXECUTING":          "Ganado en Desarrollo",
+    "WON":                "Cerrado Ganado",
+    "LOSE":               "Cerrado Perdido",
+    # Pipeline 15 - Archivadas (donde también hay deals viejos de venta)
+    "C15:NEW":            "No Aprobados",
+    "C15:WON":            "Cerrado Ganado",
+    "C15:LOSE":           "Cerrado Perdido",
+    "C15:APOLOGY":        "Analizar la falla",
+}
+
+# Categorías (pipelines) que corresponden a "Venta de máquinas".
+# Se filtra por el nombre del negocio o el CATEGORY_ID si el portal lo mapea así.
+SALES_TYPE_IDS = {"SALE", "SALES"}
+
+# CATEGORY_ID (pipeline) que corresponde a "Pipeline venta de maquinas" en el
+# portal de Cotear. En Bitrix el pipeline por defecto tiene ID "0". Este filtro
+# se aplica junto con TYPE_ID: un deal debe estar en este pipeline Y ser de
+# tipo Venta de máquinas para aparecer en la app.
+SALES_CATEGORY_ID = "0"
+
+# UF que contiene el motivo de baja en el portal Cotear (lista enumerada:
+# 197=Precio alto, 249=Sin interes real, 251=Sin repuestas, etc.).
+# El ID numérico se resuelve al label vía fetch_userfield_options().
+REASON_UF_CANDIDATES: list[str] = [
+    "UF_CRM_1774960743170",
+]
+
+
+def _webhook_base() -> str:
+    url = st.secrets["bitrix24"]["webhook_url"].rstrip("/")
+    return url + "/"
+
+
+def _call(method: str, params: dict[str, Any]) -> dict:
+    url = _webhook_base() + method + ".json"
+    resp = requests.post(url, json=params, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _batch_call(commands: dict[str, tuple[str, dict]], chunk_size: int = 50) -> dict[str, Any]:
+    """Ejecuta múltiples métodos en batch. commands = {key: (method, params)}.
+
+    Devuelve {key: result} agregado. Chunkea de a 50 (límite Bitrix).
+    Aplica rate limit entre chunks.
     """
-    Sesión HTTP compartida con reintentos automáticos (backoff exponencial) para las
-    llamadas a la API de Bitrix24. Antes, un timeout o un 429 (rate limit) se perdía
-    silenciosamente dentro de un "except: pass" y el registro quedaba con datos
-    genéricos ("Sin Nombre") sin dejar rastro de que en realidad fue un fallo de red.
-    """
-    session = requests.Session()
-    retries = Retry(
-        total=3,
-        backoff_factor=0.8,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET", "POST"]
-    )
-    session.mount("https://", HTTPAdapter(max_retries=retries))
-    session.mount("http://", HTTPAdapter(max_retries=retries))
-    return session
-
-
-BITRIX_SESSION = _build_bitrix_session()
-
-
-def bitrix_batch_get(webhook_url, method, ids):
-    """
-    Resuelve múltiples IDs (contactos, compañías, etc.) contra un método puntual de
-    Bitrix24 usando el endpoint batch.json, que admite hasta 50 comandos por request.
-    Esto reemplaza el patrón de "1 request por ID" (N+1), que con cientos de negocios
-    puede disparar decenas o cientos de llamadas secuenciales y chocar con el rate
-    limit de Bitrix24 (~2 req/seg por webhook).
-    Devuelve un diccionario {id_str: resultado_o_None}.
-    """
-    resultados = {}
-    if not ids:
-        return resultados
-
-    url = webhook_url.rstrip("/") + "/batch.json"
-    ids_unicos = [str(i) for i in dict.fromkeys(ids)]  # únicos, preservando orden
-
-    for i in range(0, len(ids_unicos), 50):
-        chunk = ids_unicos[i:i + 50]
-        cmd = {f"item_{j}": f"{method}?id={cid}" for j, cid in enumerate(chunk)}
-        try:
-            res = BITRIX_SESSION.post(url, json={"halt": 0, "cmd": cmd}, timeout=20).json()
-            result_block = res.get("result", {}).get("result", {})
-            for j, cid in enumerate(chunk):
-                resultados[cid] = result_block.get(f"item_{j}")
-        except Exception as e:
-            st.sidebar.warning(f"Fallo al resolver un lote de '{method}' en Bitrix24 ({e}). Esos registros quedarán con datos genéricos.")
-            for cid in chunk:
-                resultados[cid] = None
-
-    return resultados
-
-
-def get_bitrix_stage_names(webhook_url):
-    """Consulta la API de Bitrix24 para obtener los nombres reales de STAGE_ID."""
-    url = webhook_url.rstrip("/")
-    endpoint = f"{url}/crm.dealcategory.stage.list.json"
-    stages_dict = STAGE_MAP_BACKUP.copy()
-
-    try:
-        res = BITRIX_SESSION.get(endpoint, timeout=10).json()
-        if "result" in res and res["result"]:
-            for item in res["result"]:
-                s_id = item.get("STATUS_ID")
-                s_name = item.get("NAME")
-                if s_id and s_name:
-                    stages_dict[s_id] = sanitize_text(s_name)
-    except Exception as e:
-        # No es crítico: si falla, se sigue trabajando con STAGE_MAP_BACKUP.
-        # Se deja constancia visible en vez de fallar en silencio.
-        st.sidebar.warning(f"No se pudieron obtener los nombres de etapa desde Bitrix24 ({e}). Se usa el mapeo de respaldo.")
-    return stages_dict
-
-
-# max_entries=1 — misma logica que en google_sheets.py: cap del cache a
-# UNA sola copia para no acumular DFs en RAM entre reruns y disparar OOM.
-@st.cache_data(ttl=1800, max_entries=1)
-def load_bitrix_deals(webhook_url):
-    """
-    Extrae negociaciones de Bitrix24, filtra TYPE_ID == 'SALE',
-    mapea etapas y normaliza la salida sin arrastrar comentarios multilaboriosos.
-    """
-    REQUIRED_COLUMNS = [
-        "ID", "TITLE", "TYPE_ID", "STAGE_ID", "CATEGORY_ID",
-        "OPPORTUNITY", "CURRENCY_ID", "DATE_CREATE", "CONTACT_ID",
-        "COMPANY_ID", "Etapa", "AñoMes", "Nombre_Contacto",
-        "Compania", "Telefono", "Datos del cliente"
-    ]
-
-    if not webhook_url:
-        return pd.DataFrame(columns=REQUIRED_COLUMNS)
-
-    url = webhook_url.rstrip("/")
-    endpoint_deals = f"{url}/crm.deal.list.json"
-
-    try:
-        mapa_etapas = get_bitrix_stage_names(webhook_url)
-
-        deals = []
-        start = 0
-        while True:
-            params = {
-                "start": start,
-                "select": [
-                    "ID", "TITLE", "TYPE_ID", "STAGE_ID", "CATEGORY_ID",
-                    "OPPORTUNITY", "CURRENCY_ID", "DATE_CREATE",
-                    "CONTACT_ID", "COMPANY_ID"
-                ]
-            }
-            res = BITRIX_SESSION.get(endpoint_deals, params=params, timeout=15).json()
-            if "result" in res and res["result"]:
-                deals.extend(res["result"])
-                if "next" in res:
-                    start = res["next"]
+    results: dict[str, Any] = {}
+    keys = list(commands.keys())
+    for i in range(0, len(keys), chunk_size):
+        chunk = keys[i:i + chunk_size]
+        cmd = {}
+        for key in chunk:
+            method, params = commands[key]
+            # Serializar params estilo query-string (formato batch de Bitrix)
+            qs_parts = []
+            for pk, pv in (params or {}).items():
+                if isinstance(pv, (list, tuple)):
+                    for v in pv:
+                        qs_parts.append(f"{pk}[]={v}")
                 else:
-                    break
-            else:
+                    qs_parts.append(f"{pk}={pv}")
+            cmd[key] = method + ("?" + "&".join(qs_parts) if qs_parts else "")
+        data = _call("batch", {"cmd": cmd, "halt": 0})
+        batch_result = (data.get("result") or {}).get("result") or {}
+        for key in chunk:
+            results[key] = batch_result.get(key)
+        if i + chunk_size < len(keys):
+            time.sleep(_RATE_SLEEP)
+    return results
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_stage_map() -> dict[str, str]:
+    """Trae {STAGE_ID: NAME} de todos los pipelines en una llamada batch."""
+    mp: dict[str, str] = {}
+    try:
+        cats = _call("crm.dealcategory.list", {"select": ["ID", "NAME"]}).get("result", [])
+        cat_ids = ["0"] + [str(c["ID"]) for c in cats]
+        commands = {f"s{cid}": ("crm.dealcategory.stage.list", {"id": cid}) for cid in cat_ids}
+        results = _batch_call(commands)
+        for cid in cat_ids:
+            for s in (results.get(f"s{cid}") or []):
+                mp[str(s["STATUS_ID"])] = str(s.get("NAME", ""))
+    except Exception:
+        pass
+    return mp
+
+
+def _stage_label(stage_id: str, semantic: str = "", dyn_map: Optional[dict[str, str]] = None) -> str:
+    """Traduce STAGE_ID a nombre canónico (normalizado)."""
+    raw = _stage_label_raw(stage_id, semantic, dyn_map)
+    return STAGE_NAME_NORMALIZE.get(raw, raw)
+
+
+def _stage_label_raw(stage_id: str, semantic: str = "", dyn_map: Optional[dict[str, str]] = None) -> str:
+    """Traduce STAGE_ID a nombre. Usa mapa dinámico > aliases hardcoded > semantic."""
+    if not stage_id and not semantic:
+        return ""
+    if stage_id:
+        # 1) Mapa dinámico exacto
+        if dyn_map and stage_id in dyn_map:
+            return dyn_map[stage_id]
+        # 2) Aliases hardcoded con clave completa (ej. 'C15:LOSE')
+        if stage_id in STAGE_NAME_ALIASES:
+            return STAGE_NAME_ALIASES[stage_id]
+        # 3) Aliases por sufijo (pipeline default, ej. 'LOSE')
+        key = stage_id.split(":")[-1].upper()
+        if key in STAGE_NAME_ALIASES:
+            return STAGE_NAME_ALIASES[key]
+    # 4) Fallback por semántica (F=fail, S=success, P=in-progress)
+    sem = (semantic or "").upper()
+    if sem == "F":
+        return "Cerrado Perdido"
+    if sem == "S":
+        return "Cerrado Ganado"
+    if sem == "P":
+        return "En negociación"
+    return stage_id or ""
+
+
+def _extract_phone(deal: dict) -> str:
+    """Prioridad: WORK > MOBILE > cualquier otro. Fallback a email si nada."""
+    # Bitrix suele exponer 'PHONE' como multifield en crm.contact; en crm.deal
+    # el número viene por el contacto asociado. Aquí probamos varias claves.
+    for key in ("PHONE_WORK", "WORK_PHONE", "PHONE", "MOBILE"):
+        val = deal.get(key)
+        if isinstance(val, list) and val:
+            v = val[0].get("VALUE") if isinstance(val[0], dict) else val[0]
+            if v:
+                return str(v)
+        elif val:
+            return str(val)
+    return ""
+
+
+def _month_bounds(year_month: str) -> tuple[str, str]:
+    year, month = year_month.split("-")
+    year, month = int(year), int(month)
+    ny = year + (1 if month == 12 else 0)
+    nm = 1 if month == 12 else month + 1
+    return (f"{year:04d}-{month:02d}-01T00:00:00",
+            f"{ny:04d}-{nm:02d}-01T00:00:00")
+
+
+def _paginate_deals(filter_dict: dict) -> list[dict]:
+    """Pagina crm.deal.list con un filtro dado."""
+    deals: list[dict] = []
+    start = 0
+    while True:
+        data = _call("crm.deal.list", {
+            "start": start,
+            "order": {"DATE_CREATE": "DESC"},
+            "filter": filter_dict,
+            "select": ["*", "UF_*"],
+        })
+        page = data.get("result", [])
+        deals.extend(page)
+        nxt = data.get("next")
+        if nxt is None:
+            break
+        start = nxt
+        time.sleep(_RATE_SLEEP)
+    return deals
+
+
+def fetch_activity_for_month(year_month: str) -> list[dict]:
+    """Trae la 'actividad del mes' filtrando server-side por pipeline Venta de
+    máquinas (CATEGORY_ID=0) + tipo SALE, y MOVED_TIME o DATE_CREATE en el mes.
+    """
+    date_from, date_to = _month_bounds(year_month)
+    base = {"CATEGORY_ID": SALES_CATEGORY_ID, "TYPE_ID": "SALE"}
+
+    moved = _paginate_deals({**base, ">=MOVED_TIME": date_from, "<MOVED_TIME": date_to})
+    created = _paginate_deals({**base, ">=DATE_CREATE": date_from, "<DATE_CREATE": date_to})
+
+    by_id: dict[str, dict] = {}
+    for d in moved + created:
+        by_id[str(d.get("ID"))] = d
+    return list(by_id.values())
+
+
+# Alias de compatibilidad
+def fetch_deals_for_month(year_month: str) -> list[dict]:
+    return fetch_activity_for_month(year_month)
+
+
+def fetch_all_deals(progress: Optional[callable] = None) -> list[dict]:
+    """Trae todos los deals. Primera llamada da 'total'; el resto va en batch."""
+    first = _call("crm.deal.list", {
+        "start": 0,
+        "order": {"DATE_CREATE": "DESC"},
+        "select": ["*", "UF_*"],
+    })
+    deals: list[dict] = list(first.get("result", []))
+    total = int(first.get("total", len(deals)))
+    if progress:
+        progress(len(deals))
+
+    if total <= len(deals):
+        return deals
+
+    # Construir el resto de las páginas (start=50, 100, 150…) en batch
+    remaining_starts = list(range(len(deals), total, 50))
+    time.sleep(_RATE_SLEEP)
+    commands = {
+        f"p{s}": ("crm.deal.list", {
+            "start": s,
+            "order[DATE_CREATE]": "DESC",
+            "select[]": "*",
+        }) for s in remaining_starts
+    }
+    # Nota: en batch los UF hay que pedirlos con select[]=UF_*
+    for k in commands:
+        commands[k] = (commands[k][0], {**commands[k][1], "select[]": ["*", "UF_*"]})
+
+    results = _batch_call(commands)
+    for s in remaining_starts:
+        page = results.get(f"p{s}") or []
+        if isinstance(page, dict):
+            page = page.get("result", [])
+        deals.extend(page)
+        if progress:
+            progress(len(deals))
+    return deals
+
+
+def _parse_contact(c: dict) -> dict:
+    phone = ""
+    for entry in (c.get("PHONE") or []):
+        v = entry.get("VALUE") if isinstance(entry, dict) else ""
+        if v:
+            phone = str(v)
+            break
+    if not phone:
+        for entry in (c.get("EMAIL") or []):
+            v = entry.get("VALUE") if isinstance(entry, dict) else ""
+            if v:
+                phone = str(v)
                 break
+    name = " ".join(
+        str(x).strip()
+        for x in (c.get("NAME", ""), c.get("SECOND_NAME", ""), c.get("LAST_NAME", ""))
+        if x
+    ).strip()
+    return {"name": name, "phone": phone}
 
-        if not deals:
-            return pd.DataFrame(columns=REQUIRED_COLUMNS)
 
-        clean_deals = []
-        for d in deals:
-            item = {}
-            for k, v in d.items():
-                item[k] = sanitize_text(v)
-            clean_deals.append(item)
-
-        df_deals = pd.DataFrame(clean_deals)
-
-        for col in ["TITLE", "TYPE_ID", "STAGE_ID", "CONTACT_ID", "COMPANY_ID"]:
-            if col not in df_deals.columns:
-                df_deals[col] = ""
-
-        df_deals = df_deals[df_deals["TYPE_ID"].str.upper() == "SALE"].copy()
-
-        if df_deals.empty:
-            return pd.DataFrame(columns=REQUIRED_COLUMNS)
-
-        df_deals["Etapa"] = df_deals["STAGE_ID"].map(mapa_etapas).fillna(df_deals["STAGE_ID"])
-
-        if "DATE_CREATE" in df_deals.columns:
-            df_deals["DATE_CREATE"] = pd.to_datetime(df_deals["DATE_CREATE"], errors="coerce")
-            df_deals["AñoMes"] = df_deals["DATE_CREATE"].dt.strftime("%Y-%m").fillna("Sin Fecha")
+def fetch_contacts(contact_ids: list[str]) -> dict[str, dict]:
+    """Trae {id: {name, phone}} de contactos en batch."""
+    valid = [str(c) for c in contact_ids if c and str(c) != "0"]
+    if not valid:
+        return {}
+    commands = {f"c{cid}": ("crm.contact.get", {"id": cid}) for cid in valid}
+    results = _batch_call(commands)
+    out: dict[str, dict] = {}
+    for cid in valid:
+        c = results.get(f"c{cid}") or {}
+        if isinstance(c, dict):
+            out[cid] = _parse_contact(c)
         else:
-            df_deals["DATE_CREATE"] = pd.NaT
-            df_deals["AñoMes"] = "Sin Fecha"
+            out[cid] = {"name": "", "phone": ""}
+    return out
 
-        unique_contacts = [cid for cid in df_deals.get("CONTACT_ID", pd.Series()).unique() if str(cid) not in ["0", "", "None"]]
-        unique_companies = [compid for compid in df_deals.get("COMPANY_ID", pd.Series()).unique() if str(compid) not in ["0", "", "None"]]
 
-        # Resolución en lote (batch.json) en vez de 1 request HTTP por contacto/compañía:
-        # con 333 negocios esto reducía potencialmente 200+ llamadas secuenciales a un
-        # puñado de requests, evitando el rate limit de Bitrix24.
-        raw_contacts = bitrix_batch_get(webhook_url, "crm.contact.get", unique_contacts)
-        raw_companies = bitrix_batch_get(webhook_url, "crm.company.get", unique_companies)
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_userfield_options() -> dict[str, dict[str, str]]:
+    """Trae {UF_NAME: {ID_opcion: LABEL}} para los userfields tipo lista de deals."""
+    out: dict[str, dict[str, str]] = {}
+    try:
+        data = _call("crm.deal.userfield.list", {})
+        for f in data.get("result", []):
+            if f.get("USER_TYPE_ID") != "enumeration":
+                continue
+            fname = f.get("FIELD_NAME", "")
+            items = f.get("LIST") or []
+            out[fname] = {str(it["ID"]): str(it.get("VALUE", "")) for it in items}
+    except Exception:
+        pass
+    return out
 
-        contacts_cache = {}
-        for c_id, data in raw_contacts.items():
-            if data:
-                nombre = sanitize_text(f"{data.get('NAME', '')} {data.get('LAST_NAME', '')}") or "Sin Nombre"
-                tels = data.get("PHONE", [])
-                telefono = sanitize_text(tels[0].get("VALUE")) if tels else "Sin Teléfono"
-                contacts_cache[c_id] = {"nombre": nombre, "telefono": telefono}
-            else:
-                contacts_cache[c_id] = {"nombre": "Sin Nombre", "telefono": "Sin Teléfono"}
 
-        companies_cache = {}
-        for comp_id, data in raw_companies.items():
-            if data:
-                companies_cache[comp_id] = sanitize_text(data.get("TITLE", "Sin Compañía"))
-            else:
-                companies_cache[comp_id] = "Sin Compañía"
+def fetch_companies(company_ids: list[str]) -> dict[str, str]:
+    """Trae {id: TITLE} de compañías en batch."""
+    valid = [str(c) for c in company_ids if c and str(c) != "0"]
+    if not valid:
+        return {}
+    commands = {f"co{cid}": ("crm.company.get", {"id": cid}) for cid in valid}
+    results = _batch_call(commands)
+    out: dict[str, str] = {}
+    for cid in valid:
+        c = results.get(f"co{cid}") or {}
+        if isinstance(c, dict):
+            out[cid] = str(c.get("TITLE", "") or "")
+        else:
+            out[cid] = ""
+    return out
 
-        nombres_contacto, telefonos_contacto, nombres_compania = [], [], []
 
-        for _, row in df_deals.iterrows():
-            cid = str(row.get("CONTACT_ID", ""))
-            compid = str(row.get("COMPANY_ID", ""))
+DEAL_COLUMNS_OUT = [
+    "ID negocio", "Fecha creacion", "Fecha movimiento", "Nuevo",
+    "Nombre negocio", "Tipo maquinaria", "Etapa",
+    "Cliente", "Compania", "Telefono", "Motivo de baja",
+    "_phone_sig",
+]
 
-            c_data = contacts_cache.get(cid, {"nombre": "Sin Contacto", "telefono": "Sin Teléfono"})
-            nombres_contacto.append(c_data["nombre"])
-            telefonos_contacto.append(c_data["telefono"])
-            nombres_compania.append(companies_cache.get(compid, "Sin Compañía"))
 
-        df_deals["Nombre_Contacto"] = nombres_contacto
-        df_deals["Compania"] = nombres_compania
-        df_deals["Telefono"] = telefonos_contacto
+def deals_to_dataframe(deals: list[dict], year_month: Optional[str] = None) -> pd.DataFrame:
+    """Filtra a 'Venta de máquinas' y normaliza campos.
 
-        df_deals["Datos del cliente"] = df_deals.apply(
-            lambda r: f"Cliente: {r['Nombre_Contacto']} | Empresa: {r['Compania']} | Tel: {r['Telefono']}",
-            axis=1
-        )
+    year_month (YYYY-MM): si se pasa, la columna 'Nuevo' marca los deals cuya
+    DATE_CREATE cae dentro de ese mes.
+    """
+    if not deals:
+        return pd.DataFrame(columns=DEAL_COLUMNS_OUT)
 
-        return df_deals
+    df = pd.DataFrame(deals)
 
-    except Exception as e:
-        st.error(f"Error al extraer datos de Bitrix24: {e}")
-        return pd.DataFrame(columns=REQUIRED_COLUMNS)
+    def col(name: str) -> pd.Series:
+        if name in df.columns:
+            return df[name].fillna("").astype(str)
+        return pd.Series([""] * len(df), index=df.index, dtype=str)
+
+    # Doble filtro: TYPE_ID en SALES_TYPE_IDS Y CATEGORY_ID == SALES_CATEGORY_ID.
+    # Esto excluye deals que son "Ventas de máquinas" por tipo pero que fueron
+    # cargados en pipelines equivocados (asistencia técnica, archivadas, etc.).
+    type_col = col("TYPE_ID").str.upper()
+    cat_col = col("CATEGORY_ID")
+    mask = type_col.isin(SALES_TYPE_IDS) & (cat_col == SALES_CATEGORY_ID)
+    df = df[mask].copy()
+
+    if df.empty:
+        return pd.DataFrame(columns=DEAL_COLUMNS_OUT)
+
+    contact_ids = col("CONTACT_ID").reindex(df.index).fillna("").astype(str).tolist()
+    company_ids = col("COMPANY_ID").reindex(df.index).fillna("").astype(str).tolist()
+
+    contacts = fetch_contacts(sorted({c for c in contact_ids if c and c != "0"}))
+    companies = fetch_companies(sorted({c for c in company_ids if c and c != "0"}))
+
+    fecha_series = pd.to_datetime(col("DATE_CREATE").reindex(df.index), errors="coerce")
+    moved_series = pd.to_datetime(col("MOVED_TIME").reindex(df.index), errors="coerce")
+
+    # Flag Nuevo: DATE_CREATE cae en el mes especificado
+    if year_month:
+        y, m = year_month.split("-")
+        y, m = int(y), int(m)
+        nuevos = fecha_series.map(lambda d: bool(d) and d.year == y and d.month == m)
+    else:
+        nuevos = pd.Series([False] * len(df), index=df.index)
+
+    clientes = [contacts.get(c, {}).get("name", "") for c in contact_ids]
+    companias = [companies.get(c, "") for c in company_ids]
+
+    # Etapa: mapa dinámico + STAGE_ID + STAGE_SEMANTIC_ID
+    stage_map = fetch_stage_map()
+    stage_ids = col("STAGE_ID").reindex(df.index).fillna("").tolist()
+    semantics = col("STAGE_SEMANTIC_ID").reindex(df.index).fillna("").tolist()
+    etapas = [_stage_label(sid, sem, stage_map) for sid, sem in zip(stage_ids, semantics)]
+
+    # Motivo de baja: probar REASON y luego los UF configurados (resolviendo listas)
+    uf_options = fetch_userfield_options()
+    motivos = []
+    reason_series = col("REASON").reindex(df.index).fillna("").tolist()
+    uf_series = {uf: col(uf).reindex(df.index).fillna("").tolist() for uf in REASON_UF_CANDIDATES}
+    for i in range(len(df)):
+        m = reason_series[i]
+        if not m:
+            for uf in REASON_UF_CANDIDATES:
+                v = uf_series[uf][i]
+                if v and v != "False":
+                    # Si es una lista enumerada, resolver ID → label
+                    if uf in uf_options and v in uf_options[uf]:
+                        m = uf_options[uf][v]
+                    else:
+                        m = v
+                    break
+        motivos.append(m)
+
+    out = pd.DataFrame({
+        "ID negocio":       col("ID").reindex(df.index).fillna("").tolist(),
+        "Fecha creacion":   fecha_series.dt.strftime("%d-%m-%y").fillna("").tolist(),
+        "Fecha movimiento": moved_series.dt.strftime("%d-%m-%y").fillna("").tolist(),
+        "Nuevo":            ["Sí" if n else "" for n in nuevos.tolist()],
+        "Nombre negocio":   col("TITLE").reindex(df.index).fillna("").tolist(),
+        "Etapa":            etapas,
+        "Cliente":          clientes,
+        "Compania":         companias,
+        "Motivo de baja":   motivos,
+    })
+
+    out["Tipo maquinaria"] = out["Nombre negocio"].map(classify_machinery)
+
+    raw_phones = df.apply(_extract_phone, axis=1).tolist()
+    phones = []
+    for i, raw in enumerate(raw_phones):
+        if not raw:
+            raw = contacts.get(contact_ids[i], {}).get("phone", "")
+        phones.append(format_ar(raw))
+    out["Telefono"] = phones
+    out["_phone_sig"] = [significant_ar(p) for p in phones]
+
+    return out[DEAL_COLUMNS_OUT]
