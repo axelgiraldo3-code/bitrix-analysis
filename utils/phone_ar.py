@@ -1,213 +1,120 @@
-"""
-Formateo y validación de números telefónicos argentinos con búsqueda O(1)
-sobre los códigos de área oficiales (`data/codigos_area_argentina.json`).
+"""Normalización y formateo de números telefónicos argentinos.
 
-Reglas de negocio (ver ticket de integración):
-
-1. Si el número original viene con prefijo internacional (`+` o `00`) y
-   el código de país NO es 54, se IGNORAN todas las reglas argentinas y
-   se devuelve el número tal cual, con una limpieza mínima
-   (`+<pais><digitos>`). NUNCA se le aplica la normalización AR, para
-   no destruir contactos de Chile (+56), Brasil (+55), España (+34), etc.
-2. Si el número es local o tiene prefijo +54 / 0054, se normaliza al
-   formato E.164 argentino: `+549` + código de área + número local.
-3. La validación del código de área se hace contra `set()` (O(1) por
-   lookup) en orden jerárquico 4 → 3 → 2 dígitos, verificando que el
-   bloque total argentino sea de exactamente 10 dígitos.
-4. Si nada valida, se devuelve el input original sin modificar — regla
-   defensiva para no perder datos ambiguos.
+Formato objetivo: '+54 9 (XXX) XXXX-XXXX' donde el (XXX) puede ser 2, 3 o 4 dígitos
+según el código de área. Si no es argentino, se devuelve el número tal cual
+(con '+' inicial si corresponde) sin formateo.
 """
+from __future__ import annotations
 
 import json
 import re
 from pathlib import Path
-from functools import lru_cache
-
-from .config import DATA_DIR
+from typing import Optional
 
 
-_AREA_CODES_FILE = Path(DATA_DIR) / "codigos_area_argentina.json"
+_DIGITS = re.compile(r"\D+")
+_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_CODES_CACHE: Optional[list[str]] = None
 
 
-@lru_cache(maxsize=1)
-def _load_area_code_sets():
-    """
-    Carga el JSON UNA sola vez (cacheado con lru_cache) y devuelve un
-    diccionario `{longitud: frozenset(codigos)}`. Usar frozenset — y no
-    listas — es lo que garantiza el O(1) por lookup exigido por el
-    ticket: con listas la búsqueda sería O(n) por cada teléfono validado
-    y se degradaría linealmente al crecer el catálogo de códigos.
-
-    lru_cache evita releer el archivo en cada llamada (el JSON pesa ~5
-    KB pero la app puede validar cientos de teléfonos por rerun de
-    Streamlit).
-    """
-    with open(_AREA_CODES_FILE, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-    codes = raw.get("argentina_area_codes", {})
-    return {
-        4: frozenset(codes.get("len_4", [])),
-        3: frozenset(codes.get("len_3", [])),
-        2: frozenset(codes.get("len_2", [])),
-    }
-
-
-def _international_non_ar(digits):
-    """Devuelve la forma canónica `+<pais><resto>` para un número
-    internacional que NO es argentino. No intenta re-formatear el bloque
-    local del país extranjero — solo garantiza el prefijo '+' y elimina
-    separadores raros."""
-    return f"+{digits}"
+def _load_area_codes() -> list[str]:
+    global _CODES_CACHE
+    if _CODES_CACHE is not None:
+        return _CODES_CACHE
+    path = _DATA_DIR / "codigos_area_argentina.json"
+    if not path.exists():
+        _CODES_CACHE = []
+        return _CODES_CACHE
+    with path.open("r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    # Aceptamos tanto {"codes": [...]} como una lista directa o {"XXX": "Ciudad", ...}
+    if isinstance(data, dict):
+        if "codes" in data and isinstance(data["codes"], list):
+            codes = [str(c) for c in data["codes"]]
+        else:
+            codes = list(data.keys())
+    elif isinstance(data, list):
+        codes = [str(c) for c in data]
+    else:
+        codes = []
+    # Ordenar por longitud descendente para que el matching prefiera 4>3>2 dígitos
+    _CODES_CACHE = sorted({c for c in codes if c.isdigit()}, key=len, reverse=True)
+    return _CODES_CACHE
 
 
-def format_phone_ar_e164(raw):
-    """
-    Normaliza `raw` a E.164 argentino (`+549XXXXXXXXXX`) cuando
-    corresponde. Comportamiento resumido:
+def only_digits(value: str | None) -> str:
+    if value is None:
+        return ""
+    return _DIGITS.sub("", str(value))
 
-    - Extranjero (+/00 + país ≠ 54): se devuelve `+<pais><resto>`.
-    - Argentino válido: se devuelve `+549<area><local>` (14 caracteres).
-    - Argentino inválido o formato irreconocible: se devuelve `raw` tal
-      cual (sin destruir la entrada).
-    - `None` o cadena vacía: `""`.
-    """
+
+def is_argentine(digits: str) -> bool:
+    """Heurística: 10 dígitos, o 11 (con 9), o 12 (con 54 9), o 13 (con 549)."""
+    if not digits:
+        return False
+    if digits.startswith("54"):
+        # 54 + 9 + 10 = 13, o 54 + 10 = 12
+        rest = digits[2:]
+        if rest.startswith("9"):
+            rest = rest[1:]
+        return len(rest) == 10
+    if digits.startswith("9") and len(digits) == 11:
+        return True
+    return len(digits) == 10
+
+
+def significant_ar(digits: str) -> str:
+    """Devuelve los últimos 10 dígitos si el número es argentino, si no ''."""
+    d = only_digits(digits)
+    if not is_argentine(d):
+        return ""
+    return d[-10:]
+
+
+def format_ar(raw: str | None) -> str:
+    """Formatea a '+54 9 (XXX) XXXX-XXXX' si es argentino; devuelve original si no."""
     if raw is None:
         return ""
-    s = str(raw).strip()
-    if not s:
+    original = str(raw).strip()
+    digits = only_digits(original)
+    if not digits:
         return ""
 
-    # ------------------------------------------------------------------
-    # 1) DETECCIÓN DE ORIGEN INTERNACIONAL
-    # ------------------------------------------------------------------
-    # Distinguimos '+' y '00' explícitamente porque son los DOS marcadores
-    # estándar de discado internacional; cualquier otra cosa que empiece
-    # con dígitos se trata como número local / AR ambiguo y se normaliza
-    # más abajo.
-    intl_digits = None
-    if s.startswith("+"):
-        intl_digits = re.sub(r"\D", "", s[1:])
-    elif s.startswith("00"):
-        intl_digits = re.sub(r"\D", "", s[2:])
+    if not is_argentine(digits):
+        # No argentino: preservar '+' si venía
+        return f"+{digits}" if original.startswith("+") else original
 
-    if intl_digits is not None:
-        if not intl_digits.startswith("54"):
-            # País distinto de Argentina: se IGNORA la lógica AR y se
-            # devuelve con formato internacional estándar. Esto respeta
-            # números como +56 9 XXXX XXXX (Chile) o +34 6XX XXX XXX
-            # (España) sin destrozarlos.
-            return _international_non_ar(intl_digits)
-        # Sí es +54 / 0054 → se procesa como AR abajo.
-        digits = intl_digits
+    local10 = digits[-10:]  # los últimos 10 son AREA(2-4) + LOCAL
+
+    codes = _load_area_codes()
+    area = ""
+    local = ""
+    for code in codes:
+        if 2 <= len(code) <= 4 and local10.startswith(code):
+            area = code
+            local = local10[len(code):]
+            break
+
+    if not area:
+        # Fallback: asumir 3 dígitos de área
+        area = local10[:3]
+        local = local10[3:]
+
+    if len(local) == 8:
+        local_fmt = f"{local[:4]}-{local[4:]}"
+    elif len(local) == 7:
+        local_fmt = f"{local[:3]}-{local[3:]}"
+    elif len(local) == 6:
+        local_fmt = f"{local[:2]}-{local[2:]}"
     else:
-        # Sin prefijo internacional: tomamos solo dígitos y asumimos AR.
-        digits = re.sub(r"\D", "", s)
+        local_fmt = local
 
-    if not digits:
-        return s
-
-    # Marca "el origen declaró AR" (venía con +54, 0054, o los dígitos
-    # crudos empiezan con 54 — típico de WhatsApp que entrega el número
-    # en E.164 sin '+'). Se usa más abajo como fallback: si el catálogo
-    # de códigos de área está incompleto, un número que claramente vino
-    # como AR NO debe caer al bucket de "extranjero".
-    _origen_ar = (intl_digits is not None) or digits.startswith("54")
-
-    # ------------------------------------------------------------------
-    # 2) NORMALIZACIÓN DEL BLOQUE ARGENTINO
-    # ------------------------------------------------------------------
-    # Estos strippings son idempotentes y se aplican en orden fijo:
-    #   54  → código de país (si venía como +54 ya lo removimos, pero el
-    #         usuario puede haber escrito el 54 sin '+').
-    #   9   → prefijo de celular que WhatsApp/Bitrix inyectan tras el 54.
-    #   0   → "trunk prefix" nacional del código de área.
-    if digits.startswith("54"):
-        digits = digits[2:]
-    if digits.startswith("9"):
-        digits = digits[1:]
-    if digits.startswith("0"):
-        digits = digits[1:]
-
-    # ------------------------------------------------------------------
-    # 3) VALIDACIÓN JERÁRQUICA DEL CÓDIGO DE ÁREA (4 → 3 → 2)
-    # ------------------------------------------------------------------
-    # Orden 4→3→2 es CRÍTICO: "2202" (4 dígitos, San Pedro BA) empieza
-    # con "22" (que NO es código válido de 2 dígitos), pero también con
-    # "220" (que tampoco lo es); si probáramos primero los de 2 dígitos
-    # podríamos aceptar un match falso para números que en realidad son
-    # de 4 dígitos. Al ir del más específico al más genérico el primer
-    # match verdadero siempre es el correcto.
-    area_sets = _load_area_code_sets()
-    for length in (4, 3, 2):
-        if len(digits) < length + 1:
-            # Al menos 1 dígito local además del área.
-            continue
-        area = digits[:length]
-        if area not in area_sets[length]:
-            continue
-
-        local = digits[length:]
-        # El "15" del celular puede aparecer INTERCALADO entre el código
-        # de área y el número local (ej. "011 15 4123-4567" →
-        # "01115..." → tras remover el 0 inicial queda "1115...", y al
-        # detectar area="11" el "15" queda al principio de `local`).
-        if local.startswith("15"):
-            local = local[2:]
-
-        if len(area) + len(local) == 10:
-            return f"+549{area}{local}"
-
-    # Fallback permisivo: el catálogo de códigos de área en el JSON está
-    # incompleto (fue el caso con Balcarce/262, y va a volver a pasar
-    # con otras áreas de baja frecuencia). Si el input claramente venía
-    # como AR (prefijo 54, +54 o 0054) y quedó reducido a exactamente 10
-    # dígitos después de sacar país + '9' móvil, lo aceptamos como AR
-    # aunque el área no matchee. Ganamos robustez sin abrir la puerta a
-    # falsos positivos: un número sin prefijo AR sigue cayendo al
-    # `return s` de abajo.
-    if _origen_ar and len(digits) == 10:
-        return f"+549{digits}"
-
-    # Nada validó → devolvemos el input original tal cual.
-    return s
+    return f"+54 9 {area} {local_fmt}".strip()
 
 
-def is_argentina_e164(formatted):
-    """True si un string YA normalizado por format_phone_ar_e164 es AR."""
-    return str(formatted or "").startswith("+549")
-
-
-def e164_to_local10(formatted):
-    """
-    Devuelve los 10 dígitos locales (`<area><local>`) a partir de un
-    E.164 argentino ya normalizado. Útil como clave de merge entre
-    fuentes (WhatsApp bot ↔ Bitrix) sin arrastrar el "+549".
-    Si `formatted` no es AR válido, devuelve "".
-    """
-    f = str(formatted or "")
-    if f.startswith("+549") and len(f) == 14:
-        return f[4:]
-    return ""
-
-
-def e164_to_area_local(formatted):
-    """
-    Devuelve la tupla `(area, local)` para un E.164 argentino ya
-    normalizado, detectando la longitud del código de área contra los
-    sets oficiales (mismo orden jerárquico 4→3→2 que en la validación).
-    Para no-AR o entrada inválida devuelve `("", "")`.
-
-    Se usa para el formato visual "+54 9 <area> <local>" en las tablas.
-    """
-    local10 = e164_to_local10(formatted)
-    if not local10:
-        return "", ""
-    sets = _load_area_code_sets()
-    for length in (4, 3, 2):
-        if local10[:length] in sets[length]:
-            return local10[:length], local10[length:]
-    # Fallback teórico: si un E.164 llegó "validado" pero el área no está
-    # en los sets, asumimos 3 dígitos (el caso más frecuente) para no
-    # devolver vacío. Este branch no debería dispararse porque
-    # `format_phone_ar_e164` solo produce `+549` cuando el área validó.
-    return local10[:3], local10[3:]
+def is_foreign(raw: str | None) -> bool:
+    """True si el número no es argentino (para clasificar automáticamente como SIN INTERES)."""
+    d = only_digits(raw)
+    if not d:
+        return False
+    return not is_argentine(d)

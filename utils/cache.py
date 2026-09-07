@@ -1,499 +1,205 @@
-"""
-Capa de caché local y automatizaciones: combina los datos de Google Sheets y
-Bitrix24, aplica las reglas de clasificación automática, y persiste/lee las
-clasificaciones manuales en una pestaña dedicada de la spreadsheet
-(configurada en utils/config.CLASSIFICATIONS_WORKSHEET).
+"""Procesamiento y deduplicación de reportes del bot."""
+from __future__ import annotations
 
-Las clasificaciones se guardan en la Sheet — no en un CSV local — para que el
-trabajo manual sobreviva a reinicios de la app y esté disponible al mismo
-tiempo para múltiples usuarios en el deploy compartido.
-"""
-
-import os
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Iterable
 
 import pandas as pd
-import streamlit as st
-import gspread
-from google.oauth2.service_account import Credentials
 
-from .config import (
-    CACHE_SHEETS_FILE,
-    CACHE_BITRIX_FILE,
-    CLASSIFICATIONS_WORKSHEET,
-    CLASSIFICATIONS_HEADERS,
-)
-from .helpers import clean_phone
-from .google_sheets import load_google_sheets_data
-from .bitrix import load_bitrix_deals
+from .phone_ar import format_ar, is_foreign, only_digits, significant_ar
 
 
-# ---------------------------------------------------------------------------
-# CLASIFICACIONES MANUALES  (persistencia en Google Sheets)
-# ---------------------------------------------------------------------------
-
-_GSPREAD_SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
+DERIVADO_BITRIX = "DERIVADO A BITRIX"
+DERIVADO_TECNICA = "DERIVADO A TÉCNICA"
+SIN_INTERES = "SIN INTERES"
+SIN_CLASIFICAR = "SIN CLASIFICAR"
 
 
-def _get_gspread_client():
-    """
-    Autentica contra Google usando el service account. Preferimos las credenciales
-    embebidas en st.secrets (necesarias en el deploy de Streamlit Cloud, donde
-    no hay archivos locales); si no están, caemos a credentials.json (uso local).
-    """
-    if "gcp_service_account" in st.secrets:
-        creds = Credentials.from_service_account_info(
-            dict(st.secrets["gcp_service_account"]), scopes=_GSPREAD_SCOPES
-        )
-    else:
-        creds = Credentials.from_service_account_file("credentials.json", scopes=_GSPREAD_SCOPES)
-    return gspread.authorize(creds)
-
-
-def _open_classifications_worksheet():
-    """
-    Abre (y devuelve) el worksheet de clasificaciones. La spreadsheet_id se lee
-    de st.secrets['google_sheets']['spreadsheet_id'], que es la misma fuente
-    que ya usa el resto de la app.
-    """
-    spreadsheet_id = st.secrets.get("google_sheets", {}).get("spreadsheet_id", "")
-    if not spreadsheet_id:
-        raise RuntimeError(
-            "No se encontró 'google_sheets.spreadsheet_id' en los secrets. "
-            "Configuralo en .streamlit/secrets.toml (local) o en el panel de "
-            "Secrets de Streamlit Cloud."
-        )
-
-    client = _get_gspread_client()
-
-    if spreadsheet_id.startswith("http") or len(spreadsheet_id) > 30:
-        sh = client.open_by_key(spreadsheet_id)
-    else:
-        sh = client.open(spreadsheet_id)
-
-    return sh.worksheet(CLASSIFICATIONS_WORKSHEET)
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _fetch_classifications_records():
-    """
-    Trae todas las filas de la pestaña Clasificaciones. Se cachea 60s para no
-    golpear la API en cada rerun de Streamlit. Se invalida manualmente después
-    de cada save_classification() vía st.cache_data.clear() sobre esta función.
-    """
-    ws = _open_classifications_worksheet()
-    return ws.get_all_records()
-
-
-def get_saved_classifications():
-    """
-    Devuelve un DataFrame con las columnas ['Enlace de Whatsapp', 'Clasificacion_Manual']
-    (las otras columnas del sheet — Fecha, Usuario — no las necesita el merge de app.py).
-    Si la pestaña está vacía o falla la conexión, devuelve un DataFrame vacío para
-    que la app siga arrancando (con todos los contactos como 'Pendiente').
-    """
-    try:
-        records = _fetch_classifications_records()
-    except Exception as e:
-        st.sidebar.warning(
-            f"No se pudieron leer las clasificaciones guardadas ({e}). "
-            "Todos los contactos aparecerán como Pendiente hasta resolver la conexión."
-        )
-        return pd.DataFrame(columns=["Enlace de Whatsapp", "Clasificacion_Manual"])
-
-    if not records:
-        return pd.DataFrame(columns=["Enlace de Whatsapp", "Clasificacion_Manual"])
-
-    df = pd.DataFrame(records, dtype=str)
-
-    # Aseguramos que estén las dos columnas que espera el resto de la app.
-    for col in ["Enlace de Whatsapp", "Clasificacion_Manual"]:
-        if col not in df.columns:
-            df[col] = ""
-
-    return df[["Enlace de Whatsapp", "Clasificacion_Manual"]]
-
-
-def save_classification(link, classification, usuario="app"):
-    """
-    Guarda (o actualiza) la clasificación manual de un contacto en la pestaña
-    Clasificaciones de la spreadsheet. Si el 'link' ya existe, actualiza la fila
-    (clasificación + fecha + usuario). Si no, la agrega al final.
-
-    - link: valor de 'Enlace de Whatsapp' (clave única del contacto).
-    - classification: string, alguna de OPCIONES_CLASIFICACION.
-    - usuario: quién hizo la clasificación (default 'app'). En Streamlit Cloud
-      con auth privada, la app puede pasar st.experimental_user.email.
-    """
-    ws = _open_classifications_worksheet()
-    fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # Buscamos el link en la columna A (Enlace de Whatsapp). find() devuelve el
-    # primer match o levanta CellNotFound.
-    try:
-        cell = ws.find(link, in_column=1)
-    except gspread.exceptions.CellNotFound:
-        cell = None
-
-    if cell is not None:
-        # Update en una sola llamada batch (B, C, D de la fila encontrada).
-        row_num = cell.row
-        ws.update(
-            range_name=f"B{row_num}:D{row_num}",
-            values=[[classification, fecha, usuario]],
-        )
-    else:
-        # Append de una fila nueva. value_input_option='USER_ENTERED' respeta
-        # tipos como fechas si algún día formateamos la columna C.
-        ws.append_row(
-            [link, classification, fecha, usuario],
-            value_input_option="USER_ENTERED",
-        )
-
-    # Invalidar el cache de lectura para que el próximo rerun vea el cambio.
-    _fetch_classifications_records.clear()
-
-
-# ---------------------------------------------------------------------------
-# CACHÉ DE DATOS FUENTE  (Google Sheets del bot + Bitrix)
-# ---------------------------------------------------------------------------
-
-def apply_automatic_classifications(df_sheets, df_bitrix):
-    """
-    Aplica las reglas automáticas de clasificación y estandarización de datos:
-    1. Negocio en Bitrix: Coincidencia de teléfono Y negocio del mismo mes o posterior.
-    2. Sobreescritura de Nombre: Estandariza el Nombre con el dato de Bitrix24 siempre que exista.
-    3. Área técnica: Si 'Clasificación' origen es 'SI_RESUMEN_G2'.
-
-    Devuelve una tupla (df_sheets, cambios), donde `cambios` es una lista de tuplas
-    (enlace, clasificacion, regla_usuario) con TODAS las filas que la función auto-clasificó
-    en esta corrida. `regla_usuario` es el string que se debe grabar en la columna
-    "Usuario" de la Sheet (ej. "auto (Bitrix)"), para poder distinguir después
-    entre clasificaciones manuales y derivadas por regla.
-
-    Las reglas SOLO tocan contactos que están en Pendiente — nunca pisan clasificaciones
-    manuales existentes.
-    """
-    cambios = []
-
-    if df_sheets.empty:
-        return df_sheets, cambios
-
-    # Indexar los negocios de Bitrix por teléfono normalizado
-    bitrix_records = {}
-    if not df_bitrix.empty and "Telefono" in df_bitrix.columns:
-        for _, row_b in df_bitrix.iterrows():
-            tel_b = clean_phone(row_b.get("Telefono"))
-            if not tel_b:
-                continue
-
-            fecha_b = pd.to_datetime(row_b.get("DATE_CREATE"), errors="coerce")
-            # Bitrix devuelve fechas con timezone (+03:00). Al comparar por período
-            # mensual más abajo con to_period('M'), pandas warnearía "Converting
-            # to Period representation will drop timezone information". Strippeamos
-            # la tz explícitamente acá para evitar ese warning en cada iteración.
-            if pd.notna(fecha_b) and getattr(fecha_b, "tz", None) is not None:
-                fecha_b = fecha_b.tz_convert(None)
-            nombre_b = str(row_b.get("Nombre_Contacto", "")).strip()
-
-            # Limpiar valores genéricos o sin datos válidos
-            if nombre_b.lower() in ["sin nombre", "none", "nan", "", "null"]:
-                nombre_b = ""
-
-            record = {
-                "fecha": fecha_b,
-                "nombre": nombre_b
-            }
-
-            if tel_b not in bitrix_records:
-                bitrix_records[tel_b] = []
-            bitrix_records[tel_b].append(record)
-
-    for idx, row in df_sheets.iterrows():
-        # "Telefono_Limpio" ya fue procesado por clean_phone() al cargar los datos del bot;
-        # solo se vuelve a limpiar si por algún motivo llega vacío y hay que derivarlo
-        # del "Enlace de Whatsapp" crudo.
-        tel_limpio = str(row.get("Telefono_Limpio", "")).strip()
-        if not tel_limpio:
-            tel_limpio = clean_phone(row.get("Enlace de Whatsapp", ""))
-        fecha_consulta = pd.to_datetime(row.get("FechaHora"), errors="coerce")
-        clasif_actual = str(row.get("Clasificacion_Manual", "Pendiente"))
-
-        # --- EVALUACIÓN DE COINCIDENCIA CON BITRIX ---
-        tiene_negocio_valido = False
-        nombre_bitrix_encontrado = ""
-
-        if tel_limpio and tel_limpio in bitrix_records:
-            negocios_cliente = bitrix_records[tel_limpio]
-
-            for neg in negocios_cliente:
-                # Guardar el nombre oficial registrado en Bitrix
-                if neg["nombre"] and not nombre_bitrix_encontrado:
-                    nombre_bitrix_encontrado = neg["nombre"]
-
-                # Regla Temporal: Mes/Año del negocio >= Mes/Año de la consulta
-                if pd.notna(fecha_consulta) and pd.notna(neg["fecha"]):
-                    periodo_consulta = fecha_consulta.to_period('M')
-                    periodo_negocio = neg["fecha"].to_period('M')
-
-                    if periodo_negocio >= periodo_consulta:
-                        tiene_negocio_valido = True
-
-        # --- SOBREESCRITURA Y NORMALIZACIÓN DE NOMBRE ---
-        # Si se encontró un nombre válido en Bitrix, sobreescribe el capturado por el bot
-        if nombre_bitrix_encontrado:
-            df_sheets.loc[idx, "Nombre"] = nombre_bitrix_encontrado
-
-        # --- ASIGNACIÓN DE CLASIFICACIÓN AUTOMÁTICA ---
-        if clasif_actual in ["Pendiente", "", "nan"]:
-            enlace = str(row.get("Enlace de Whatsapp", "")).strip()
-
-            # Regla 1: Negocio válido en Bitrix (mismo mes o posterior)
-            if tiene_negocio_valido:
-                df_sheets.loc[idx, "Clasificacion_Manual"] = "Negocio en Bitrix"
-                if enlace:
-                    cambios.append((enlace, "Negocio en Bitrix", "auto (Bitrix)"))
-                continue
-
-            # Regla 2: Clasificación de origen igual a SI_RESUMEN_G2
-            clasificacion_origen = str(row.get("Clasificación", "")).strip()
-            if clasificacion_origen == "SI_RESUMEN_G2":
-                df_sheets.loc[idx, "Clasificacion_Manual"] = "Derivado al área técnica"
-                if enlace:
-                    cambios.append((enlace, "Derivado al área técnica", "auto (SI_RESUMEN_G2)"))
-                continue
-
-    return df_sheets, cambios
-
-
-def persist_automatic_classifications(cambios, df_class_existente):
-    """
-    Vuelca a la pestaña "Clasificaciones" las clasificaciones derivadas por
-    apply_automatic_classifications() que todavía no estén registradas allí (o
-    que estén registradas con un valor distinto).
-
-    - `cambios`: lista [(enlace, clasificacion, usuario), ...] devuelta por
-      apply_automatic_classifications().
-    - `df_class_existente`: DataFrame ya cargado con lo que hay HOY en la Sheet
-      (columnas 'Enlace de Whatsapp' y 'Clasificacion_Manual'). Se pasa desde
-      afuera para no hacer una segunda lectura innecesaria.
-
-    Retorna la cantidad de filas efectivamente escritas (nuevas + actualizadas).
-    Si no hay nada que escribir, retorna 0 sin tocar la API.
-
-    Las escrituras se hacen en dos batches: append_rows() para todas las filas
-    nuevas y update() por celda para las que hay que actualizar (caso raro:
-    contactos que estaban en la Sheet como 'Pendiente' explícito).
-    """
-    if not cambios:
-        return 0
-
-    # Índice rápido de lo que ya está en la Sheet:
-    #   enlace -> clasificacion actual en la Sheet
-    ya_en_sheet = {}
-    if df_class_existente is not None and not df_class_existente.empty:
-        for _, r in df_class_existente.iterrows():
-            k = str(r.get("Enlace de Whatsapp", "")).strip()
-            v = str(r.get("Clasificacion_Manual", "")).strip()
-            if k:
-                ya_en_sheet[k] = v
-
-    a_agregar = []   # (enlace, clasif, usuario) — filas nuevas
-    a_actualizar = []  # (enlace, clasif, usuario) — ya están en la Sheet con otro valor
-
-    for enlace, clasif, usuario in cambios:
-        if enlace not in ya_en_sheet:
-            a_agregar.append((enlace, clasif, usuario))
-        elif ya_en_sheet[enlace] != clasif:
-            a_actualizar.append((enlace, clasif, usuario))
-        # else: ya está registrada con el mismo valor -> no hacemos nada
-
-    if not a_agregar and not a_actualizar:
-        return 0
-
-    ws = _open_classifications_worksheet()
-    fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    escritas = 0
-
-    # --- Append batch de las nuevas ---
-    if a_agregar:
-        rows = [[enlace, clasif, fecha, usuario] for enlace, clasif, usuario in a_agregar]
-        ws.append_rows(rows, value_input_option="USER_ENTERED")
-        escritas += len(a_agregar)
-
-    # --- Update una a una para las que ya existían (raro) ---
-    for enlace, clasif, usuario in a_actualizar:
+def _parse_dt(value: str) -> datetime | None:
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S"):
         try:
-            cell = ws.find(enlace, in_column=1)
-            ws.update(
-                range_name=f"B{cell.row}:D{cell.row}",
-                values=[[clasif, fecha, usuario]],
-            )
-            escritas += 1
-        except gspread.exceptions.CellNotFound:
-            # Race condition raro: el enlace desapareció entre la lectura y ahora.
-            # Lo agregamos como fila nueva y seguimos.
-            ws.append_row([enlace, clasif, fecha, usuario], value_input_option="USER_ENTERED")
-            escritas += 1
-
-    # Invalidar el cache de lectura para que el próximo rerun vea todo.
-    _fetch_classifications_records.clear()
-
-    return escritas
-
-
-def persist_enriched_sheets(df_sheets):
-    """
-    Reescribe el CACHE_SHEETS_FILE con el df_sheets ya enriquecido en
-    memoria (típicamente después de que apply_automatic_classifications()
-    haya sobreescrito 'Nombre' con el nombre oficial de Bitrix).
-
-    Motivación: sin esto, el enriquecimiento del Nombre vive solo en
-    memoria y se pierde entre reruns. Si Bitrix falla o tarda en la
-    próxima corrida, el reporte muestra 'None' donde antes veíamos el
-    nombre oficial y hay que recargar para que aparezca de nuevo.
-    Persistiendo el df ya enriquecido al CSV local, la próxima vez que
-    la cache se lea sin force_refresh, ya trae los Nombres de Bitrix
-    grabados y el reporte se ve completo aunque Bitrix esté caído.
-
-    - Idempotente: si el df no cambió, sobreescribe el CSV con el mismo
-      contenido (costo despreciable, escribe local, unos pocos MB).
-    - No lanza: si el disco/permiso falla, absorbe la excepción y
-      devuelve False, para que un problema de persistencia nunca rompa
-      la app en memoria (que ya tiene el df enriquecido igual).
-    - Devuelve True si escribió, False si el df era vacío o falló.
-    """
-    if df_sheets is None or df_sheets.empty:
-        return False
+            return datetime.strptime(str(value).strip(), fmt)
+        except ValueError:
+            continue
     try:
-        df_sheets.to_csv(CACHE_SHEETS_FILE, index=False, encoding="utf-8-sig")
-        return True
+        return pd.to_datetime(value, errors="coerce").to_pydatetime()
     except Exception:
-        return False
+        return None
 
 
-def _cache_files_look_valid():
-    """True si ambos CSVs existen y tienen los headers mínimos esperados.
-    Es una verificación barata (nrows=2) — no valida el contenido entero."""
-    if not (os.path.exists(CACHE_SHEETS_FILE) and os.path.exists(CACHE_BITRIX_FILE)):
-        return False
-    try:
-        s = pd.read_csv(CACHE_SHEETS_FILE, nrows=2)
-        b = pd.read_csv(CACHE_BITRIX_FILE, nrows=2)
-        return (
-            "FechaHora" in s.columns and "Telefono_Limpio" in s.columns
-            and "TITLE" in b.columns and "Etapa" in b.columns
-        )
-    except Exception:
-        return False
+def _wa_link_to_digits(link: str) -> str:
+    if not link:
+        return ""
+    return only_digits(link)
 
 
-def _load_from_local_csvs():
-    """Lee y normaliza tipos de los CSVs cacheados. Recalcula AñoMes en
-    ambos DFs para que un cache escrito por una versión vieja de la app
-    no arrastre valores incorrectos (bug histórico con fechas DD/MM/AAAA
-    que quedaban clasificadas en el mes equivocado)."""
-    df_sheets = pd.read_csv(CACHE_SHEETS_FILE)
-    df_bitrix = pd.read_csv(CACHE_BITRIX_FILE)
+def clean_source(raw: pd.DataFrame) -> pd.DataFrame:
+    """Convierte el DataFrame crudo del libro fuente al formato procesado.
 
-    if "FechaHora" in df_sheets.columns:
-        # dayfirst=True es defensivo: si el CSV cacheado quedó con strings en
-        # formato DD/MM/AAAA (por una versión vieja de google_sheets.py que no
-        # ponía dayfirst), esto los re-parsea correctamente. No afecta a fechas
-        # ISO ya bien serializadas — solo dispara un UserWarning cosmético
-        # en pandas 2.x que no rompe nada.
-        df_sheets["FechaHora"] = pd.to_datetime(df_sheets["FechaHora"], errors="coerce", dayfirst=True)
-        df_sheets["AñoMes"] = df_sheets["FechaHora"].dt.strftime("%Y-%m").fillna("Sin Fecha")
-    if "DATE_CREATE" in df_bitrix.columns:
-        df_bitrix["DATE_CREATE"] = pd.to_datetime(df_bitrix["DATE_CREATE"], errors="coerce")
-        if "AñoMes" in df_bitrix.columns:
-            df_bitrix["AñoMes"] = df_bitrix["DATE_CREATE"].dt.strftime("%Y-%m").fillna("Sin Fecha")
-    return df_sheets, df_bitrix
-
-
-def get_data_with_local_cache(sheet_id, sheet_name, webhook_url, force_refresh=False):
+    Salida (columnas):
+        Fecha, Numero, Nombre, Area de interes, Resumen general,
+        Clasificacion interna, Tipo de contacto, _dt (datetime), _phone_sig
     """
-    Carga datos con fallback graceful al caché local cuando alguna API
-    (Sheets o Bitrix) está caída.
+    if raw.empty:
+        return pd.DataFrame(columns=[
+            "Fecha", "Numero", "Nombre", "Area de interes",
+            "Resumen general", "Clasificacion interna", "Tipo de contacto",
+            "_dt", "_phone_sig",
+        ])
 
-    Flujo:
-      1. Si NO hay force_refresh y el caché está sano → devuelve caché
-         sin tocar APIs (fast path habitual).
-      2. Si sí hay force_refresh o el caché no está sano → intenta
-         fetchar de las APIs. Cada API se llama de forma independiente
-         dentro de try/except para que la caída de una no arrastre a
-         la otra.
-      3. Para cada API que falló o devolvió vacío, se cae al CSV local
-         si existe y tiene los headers esperados; se emite `st.info`
-         diferenciado para que el usuario vea que está trabajando con
-         datos cacheados (posiblemente desactualizados).
-      4. Si TAMPOCO hay caché disponible para el que falló, ese df se
-         devuelve vacío y se muestra un `st.error` claro pidiendo
-         reintentar en unos minutos. La app entra al branch "df vacío"
-         de app.py y muestra el estado sin crashear.
+    dt = raw["fecha_hora"].map(_parse_dt)
+    fecha = [d.strftime("%d-%m-%y") if d else "" for d in dt]
 
-    El caché en disco solo se sobreescribe con datos frescos NO vacíos
-    — un fetch fallido nunca borra el caché existente.
+    digits = raw["wa_link"].map(_wa_link_to_digits)
+    numero_fmt = digits.map(format_ar)
+    phone_sig = digits.map(significant_ar)
+
+    nombre = raw["nombre"].fillna("").astype(str).str.strip().replace({"-": ""})
+    area = raw["area_interes"].fillna("").astype(str).str.strip()
+    tipo = raw["tipo_contacto"].fillna("").astype(str).str.strip()
+
+    # Resumen general: unir los 4 resúmenes por agente con '\n', omitiendo vacíos
+    resumen_cols = [c for c in ["resumen_1", "resumen_2", "resumen_3", "resumen_4"] if c in raw.columns]
+    resumenes = raw[resumen_cols].fillna("").astype(str)
+    resumen_general = resumenes.apply(
+        lambda row: "\n".join([x for x in (str(v).strip() for v in row) if x]), axis=1
+    )
+
+    df = pd.DataFrame({
+        "Fecha": fecha,
+        "Numero": numero_fmt,
+        "Nombre": nombre,
+        "Area de interes": area,
+        "Resumen general": resumen_general,
+        "Clasificacion interna": "",
+        "Tipo de contacto": tipo,
+        "_dt": dt,
+        "_phone_sig": phone_sig,
+    })
+    return df
+
+
+def unify_recent(df: pd.DataFrame, window_days: int = 2) -> pd.DataFrame:
+    """Unifica recursivamente reportes del mismo número con < window_days de diferencia.
+
+    Se conserva la fila más reciente (por _dt) y se concatenan los resúmenes previos.
     """
-    cache_valida = _cache_files_look_valid()
+    if df.empty:
+        return df
 
-    # Fast path: caché sano y el usuario no pidió refresh explícito.
-    if cache_valida and not force_refresh:
-        return _load_from_local_csvs()
+    df = df.copy().sort_values("_dt", na_position="first").reset_index(drop=True)
+    keep_idx: list[int] = []
+    absorbed_by: dict[int, list[int]] = {}
 
-    # Camino de fetch — cada API en su propio try/except.
-    df_sheets_new = pd.DataFrame()
-    df_bitrix_new = pd.DataFrame()
-    sheets_ok = False
-    bitrix_ok = False
+    # Recorremos por número
+    for phone, group in df.groupby("_phone_sig", sort=False):
+        if not phone:
+            keep_idx.extend(group.index.tolist())
+            continue
+        rows = group.sort_values("_dt").to_dict("index")
+        indices = list(rows.keys())
+        # Agrupamos secuencialmente por ventana de 2 días
+        current_cluster = [indices[0]]
+        clusters = []
+        for i in indices[1:]:
+            prev_dt = df.at[current_cluster[-1], "_dt"]
+            cur_dt = df.at[i, "_dt"]
+            if prev_dt and cur_dt and (cur_dt - prev_dt) <= timedelta(days=window_days):
+                current_cluster.append(i)
+            else:
+                clusters.append(current_cluster)
+                current_cluster = [i]
+        clusters.append(current_cluster)
+        for cluster in clusters:
+            master = cluster[-1]  # el más reciente
+            keep_idx.append(master)
+            if len(cluster) > 1:
+                absorbed_by[master] = cluster[:-1]
 
-    with st.spinner("🔄 Conectando y actualizando datos desde Google Sheets y Bitrix24..."):
-        try:
-            df_sheets_new = load_google_sheets_data(sheet_id, sheet_name)
-            sheets_ok = not df_sheets_new.empty
-        except Exception as e:
-            st.warning(f"⚠️ Fetch de Google Sheets falló ({e}).")
-        try:
-            df_bitrix_new = load_bitrix_deals(webhook_url)
-            bitrix_ok = not df_bitrix_new.empty
-        except Exception as e:
-            st.warning(f"⚠️ Fetch de Bitrix24 falló ({e}).")
-
-    # Persistir SOLO lo que llegó bien — un fetch fallido no debe
-    # sobreescribir el caché anterior con vacío.
-    if sheets_ok:
-        df_sheets_new.to_csv(CACHE_SHEETS_FILE, index=False, encoding="utf-8-sig")
-    if bitrix_ok:
-        df_bitrix_new.to_csv(CACHE_BITRIX_FILE, index=False, encoding="utf-8-sig")
-
-    # Fallback: si algún fetch falló Y hay caché local, usarlo.
-    if (not sheets_ok or not bitrix_ok) and cache_valida:
-        cached_sheets, cached_bitrix = _load_from_local_csvs()
-        if not sheets_ok:
-            df_sheets_new = cached_sheets
-            st.info(
-                "ℹ️ Google Sheets no responde en este momento — "
-                "mostrando los últimos datos guardados en caché local. "
-                "Reintentá 'Actualizar Datos' en unos minutos."
+    # Combinar resúmenes de los absorbidos hacia el master
+    for master, prev_ids in absorbed_by.items():
+        parts = []
+        for pid in prev_ids:
+            r = str(df.at[pid, "Resumen general"]).strip()
+            if r:
+                parts.append(r)
+        prev_join = "\n---\n".join(parts)
+        if prev_join:
+            existing = str(df.at[master, "Resumen general"]).strip()
+            df.at[master, "Resumen general"] = (
+                f"{existing}\n---\n[previos]\n{prev_join}" if existing else prev_join
             )
-        if not bitrix_ok:
-            df_bitrix_new = cached_bitrix
-            st.info(
-                "ℹ️ Bitrix24 no responde en este momento — "
-                "mostrando los últimos datos guardados en caché local."
-            )
-    elif not sheets_ok and not bitrix_ok:
-        # Sin cache y sin APIs. La app va a mostrar el branch de df vacío.
-        st.error(
-            "❌ Las APIs de Google Sheets y Bitrix24 no responden y no "
-            "hay caché local disponible (probablemente es el primer "
-            "arranque después de un redeploy). Esperá unos minutos y "
-            "recargá la página, o tocá 'Actualizar Datos desde APIs'."
-        )
-    elif sheets_ok and bitrix_ok:
-        st.toast("⚡ Datos sincronizados y caché local reconstruida con éxito", icon="✅")
+        # Nombre: si el master no tiene y algún previo sí, usar el más reciente con nombre
+        if not str(df.at[master, "Nombre"]).strip():
+            for pid in reversed(prev_ids):
+                n = str(df.at[pid, "Nombre"]).strip()
+                if n:
+                    df.at[master, "Nombre"] = n
+                    break
 
-    return df_sheets_new, df_bitrix_new
+    result = df.loc[sorted(set(keep_idx))].reset_index(drop=True)
+    return result
+
+
+def apply_auto_rules(df: pd.DataFrame, bitrix_phone_sig: set[str]) -> pd.DataFrame:
+    """Aplica las reglas automáticas de clasificación descriptas en los requisitos."""
+    if df.empty:
+        return df
+    out = df.copy()
+
+    # 1) Números extranjeros -> SIN INTERES
+    foreign_mask = out["Numero"].map(is_foreign) & (out["_phone_sig"] == "")
+    out.loc[foreign_mask & (out["Clasificacion interna"] == ""), "Clasificacion interna"] = SIN_INTERES
+
+    # 2) Coincidencia con Bitrix -> DERIVADO A BITRIX
+    if bitrix_phone_sig:
+        in_bitrix = out["_phone_sig"].isin(bitrix_phone_sig) & (out["_phone_sig"] != "")
+        out.loc[in_bitrix, "Clasificacion interna"] = DERIVADO_BITRIX
+
+    # 3) Tipo de contacto SI_RESUMEN_G2 -> DERIVADO A TÉCNICA
+    # Corre DESPUÉS de Bitrix para pisarlo: un contacto puede tener negocio en
+    # otro pipeline que no seguimos, pero si el bot lo derivó a técnica, la
+    # clasificación correcta es DERIVADO A TÉCNICA.
+    g2 = out["Tipo de contacto"].astype(str).str.upper() == "SI_RESUMEN_G2"
+    out.loc[g2, "Clasificacion interna"] = DERIVADO_TECNICA
+
+    # 4) Resto sin clasificación -> SIN CLASIFICAR
+    empty = out["Clasificacion interna"].astype(str).str.strip() == ""
+    out.loc[empty, "Clasificacion interna"] = SIN_CLASIFICAR
+    return out
+
+
+def overwrite_names_from_bitrix(df: pd.DataFrame, bitrix_df: pd.DataFrame) -> pd.DataFrame:
+    """Reemplaza el Nombre por el que figura en Bitrix cuando el teléfono coincide."""
+    if df.empty or bitrix_df.empty or "_phone_sig" not in bitrix_df.columns:
+        return df
+    lookup = (bitrix_df[bitrix_df["_phone_sig"] != ""]
+              .drop_duplicates(subset=["_phone_sig"], keep="first")
+              .set_index("_phone_sig")["Cliente"].to_dict())
+    out = df.copy()
+    def _pick(row):
+        sig = row["_phone_sig"]
+        if sig and sig in lookup and lookup[sig]:
+            return lookup[sig]
+        return row["Nombre"]
+    out["Nombre"] = out.apply(_pick, axis=1)
+    return out
+
+
+def filter_by_year_month(df: pd.DataFrame, year_month: str) -> pd.DataFrame:
+    """year_month = 'YYYY-MM'."""
+    if df.empty or "_dt" not in df.columns:
+        return df
+    year, month = year_month.split("-")
+    year, month = int(year), int(month)
+    mask = df["_dt"].map(lambda d: bool(d) and d.year == year and d.month == month)
+    return df[mask].reset_index(drop=True)
+
+
+def available_year_months(df: pd.DataFrame) -> list[str]:
+    if df.empty or "_dt" not in df.columns:
+        return []
+    ym = df["_dt"].dropna().map(lambda d: f"{d.year:04d}-{d.month:02d}")
+    return sorted(set(ym.tolist()), reverse=True)
