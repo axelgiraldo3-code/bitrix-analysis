@@ -1,25 +1,18 @@
-# Credenciales y Secretos
-credentials.json
-.streamlit/secrets.toml
-*.json
-*.env
-
-# Entornos virtuales
-venv/
-.venv/
-env/
-
-# Archivos de cache de Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.env
 
-# Datos locales de la aplicacion (Cache CSV, se regeneran al correr el script)
-data/*.csv
-!data/.gitkeep
-!data/clasificaciones_locales.csv
-!data/excluded_phones.json
-!data/codigos_area_argentina.json
+.streamlit/secrets.toml
+credentials.json
+*.pem
 
-# Archivos de sistema operativo
+data/*.cache
+data/*.tmp
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
