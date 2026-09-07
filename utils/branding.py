@@ -27,11 +27,14 @@ BITRIX_STAGE_ORDER = [
 
 BITRIX_STAGE_COLORS = {
     "Pendiente de cotizar":            "#ace9fb",
+    "Cotizado aguardando devolución":  "#39a8ef",
     "Cotizado aguardando devolucion":  "#39a8ef",
-    "En negociación":                  "#55d0e0",
+    "En negociacion":                  "#55d0e0",
+    "Ganado en Desarrollo":            "#47e4c2",
     "Ganado en desarrollo":            "#47e4c2",
     "Cerrado Ganado":                  "#7bd500",
     "Cerrado Perdido, motivo?":                 "#f11716",
+    "Cerrado Perdido":                 "#f11716",
 }
 
 
