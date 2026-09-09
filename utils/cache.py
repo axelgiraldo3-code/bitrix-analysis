@@ -81,10 +81,37 @@ def clean_source(raw: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def unify_recent(df: pd.DataFrame, window_days: int = 2) -> pd.DataFrame:
-    """Unifica recursivamente reportes del mismo número con < window_days de diferencia.
+def filter_ignored(df: pd.DataFrame, ignored_keys: set[str]) -> pd.DataFrame:
+    """Elimina del DataFrame los reportes cuyo teléfono esté en la lista negra.
 
-    Se conserva la fila más reciente (por _dt) y se concatenan los resúmenes previos.
+    ``ignored_keys`` es el set de claves normalizadas devuelto por
+    ``sheets.load_ignored_phones()``: para números argentinos son los últimos
+    10 dígitos; para extranjeros, todos los dígitos.
+    """
+    if df.empty or not ignored_keys:
+        return df
+    from .phone_ar import only_digits
+
+    def _key_for(row) -> str:
+        sig = str(row.get("_phone_sig", "") or "")
+        if sig:
+            return sig
+        return only_digits(str(row.get("Numero", "") or ""))
+
+    keep_mask = df.apply(lambda r: _key_for(r) not in ignored_keys, axis=1)
+    return df[keep_mask].reset_index(drop=True)
+
+
+def unify_recent(df: pd.DataFrame, window_days: int | None = None) -> pd.DataFrame:
+    """Unifica reportes del mismo número dentro del mismo mes calendario.
+
+    Todos los reportes con el mismo _phone_sig y el mismo (año, mes) de _dt se
+    colapsan sobre la fila más reciente (por _dt), concatenando los resúmenes
+    previos. Filas sin teléfono o sin fecha se dejan tal cual.
+
+    El parámetro ``window_days`` se mantiene por compatibilidad con llamadores
+    previos pero ya no se usa: la política vigente es dedup total por número
+    dentro del mes.
     """
     if df.empty:
         return df
@@ -93,30 +120,22 @@ def unify_recent(df: pd.DataFrame, window_days: int = 2) -> pd.DataFrame:
     keep_idx: list[int] = []
     absorbed_by: dict[int, list[int]] = {}
 
-    # Recorremos por número
-    for phone, group in df.groupby("_phone_sig", sort=False):
-        if not phone:
-            keep_idx.extend(group.index.tolist())
-            continue
-        rows = group.sort_values("_dt").to_dict("index")
-        indices = list(rows.keys())
-        # Agrupamos secuencialmente por ventana de 2 días
-        current_cluster = [indices[0]]
-        clusters = []
-        for i in indices[1:]:
-            prev_dt = df.at[current_cluster[-1], "_dt"]
-            cur_dt = df.at[i, "_dt"]
-            if prev_dt and cur_dt and (cur_dt - prev_dt) <= timedelta(days=window_days):
-                current_cluster.append(i)
-            else:
-                clusters.append(current_cluster)
-                current_cluster = [i]
-        clusters.append(current_cluster)
-        for cluster in clusters:
-            master = cluster[-1]  # el más reciente
-            keep_idx.append(master)
-            if len(cluster) > 1:
-                absorbed_by[master] = cluster[:-1]
+    def _ym(dt):
+        return (dt.year, dt.month) if dt else None
+
+    df["_ym"] = df["_dt"].map(_ym)
+
+    # Filas sin teléfono o sin fecha: no se tocan (imposible agruparlas).
+    no_key_mask = (df["_phone_sig"].astype(str) == "") | df["_ym"].isna()
+    keep_idx.extend(df.index[no_key_mask].tolist())
+
+    keyed = df[~no_key_mask]
+    for (_phone, _ym_val), group in keyed.groupby(["_phone_sig", "_ym"], sort=False):
+        indices = group.sort_values("_dt").index.tolist()
+        master = indices[-1]  # el más reciente del mes
+        keep_idx.append(master)
+        if len(indices) > 1:
+            absorbed_by[master] = indices[:-1]
 
     # Combinar resúmenes de los absorbidos hacia el master
     for master, prev_ids in absorbed_by.items():
@@ -139,7 +158,7 @@ def unify_recent(df: pd.DataFrame, window_days: int = 2) -> pd.DataFrame:
                     df.at[master, "Nombre"] = n
                     break
 
-    result = df.loc[sorted(set(keep_idx))].reset_index(drop=True)
+    result = df.loc[sorted(set(keep_idx))].drop(columns=["_ym"]).reset_index(drop=True)
     return result
 
 

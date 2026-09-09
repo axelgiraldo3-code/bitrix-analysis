@@ -320,19 +320,31 @@ def load_persisted_classifications(year_month: str) -> dict[str, str]:
     }
 
 
-def sync_month_bot(year_month: str, df: pd.DataFrame) -> None:
+def sync_month_bot(year_month: str, df: pd.DataFrame,
+                   ignored_keys: set[str] | None = None) -> None:
     """Persiste el snapshot completo del mes (incluye clasificaciones automáticas).
 
     Merge con lo ya guardado por Numero: las clasificaciones existentes en la
     hoja no se pisan si vienen distintas del snapshot (la hoja es fuente de
     verdad para clasificaciones ya hechas). Sólo se agregan filas nuevas o se
     actualiza el nombre si ahora está poblado.
+
+    Si se pasa ``ignored_keys``, cualquier fila persistida cuyo número matchee
+    la lista negra se OMITE del output — así, cuando un número se agrega a
+    `_ignorados`, se limpia también del histórico de las pestañas mensuales en
+    el próximo sync.
     """
+    ignored_keys = ignored_keys or set()
     persisted = read_month_dataframe(year_month, "Bot")
     persisted_map = {
         str(r["Numero"]): dict(r) for _, r in persisted.iterrows()
         if str(r.get("Numero", "")).strip()
     }
+
+    def _is_ignored(numero: str) -> bool:
+        if not ignored_keys:
+            return False
+        return _ignore_key(numero) in ignored_keys
 
     rows_out = []
     seen_numeros: set[str] = set()
@@ -353,18 +365,73 @@ def sync_month_bot(year_month: str, df: pd.DataFrame) -> None:
             "Clasificacion interna": classification,
         })
 
-    # Conservar filas persistidas que ya no aparecen en el snapshot (histórico)
+    # Conservar filas persistidas que ya no aparecen en el snapshot (histórico),
+    # salvo que ahora estén en la lista negra.
     for num, existing in persisted_map.items():
-        if num not in seen_numeros:
-            rows_out.append({
-                "Fecha": str(existing.get("Fecha", "")),
-                "Numero": num,
-                "Nombre": str(existing.get("Nombre", "")),
-                "Clasificacion interna": str(existing.get("Clasificacion interna", "")),
-            })
+        if num in seen_numeros:
+            continue
+        if _is_ignored(num):
+            continue  # limpieza retroactiva: se cae de la hoja del mes
+        rows_out.append({
+            "Fecha": str(existing.get("Fecha", "")),
+            "Numero": num,
+            "Nombre": str(existing.get("Nombre", "")),
+            "Clasificacion interna": str(existing.get("Clasificacion interna", "")),
+        })
 
     out_df = pd.DataFrame(rows_out, columns=BOT_HEADERS)
     write_month_dataframe(year_month, "Bot", out_df)
+
+
+_IGNORED_TAB = "_ignorados"
+_IGNORED_HEADERS = ["Numero", "Motivo", "Fecha alta"]
+
+
+def _ignore_key(raw: str) -> str:
+    """Clave de matching para un número ignorado.
+
+    Argentino → últimos 10 dígitos (mismo criterio que `_phone_sig`).
+    No argentino → todos los dígitos, para poder ignorar cualquier prueba
+    con número extranjero también.
+    """
+    from .phone_ar import only_digits, significant_ar
+    sig = significant_ar(raw)
+    if sig:
+        return sig
+    return only_digits(raw)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_ignored_phones() -> set[str]:
+    """Devuelve el set de claves de teléfonos a ignorar.
+
+    Lee la pestaña `_ignorados` del libro destino (columna `Numero`).
+    Si la pestaña no existe, se crea vacía y se devuelve un set vacío.
+    Cacheado 5 min para no golpear Sheets en cada rerun.
+    """
+    sh = _open_dest()
+    try:
+        ws = sh.worksheet(_IGNORED_TAB)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=_IGNORED_TAB, rows=100,
+                              cols=len(_IGNORED_HEADERS))
+        ws.update(range_name="A1", values=[_IGNORED_HEADERS])
+        return set()
+    values = ws.get_all_values()
+    if not values or len(values) < 2:
+        return set()
+    hdr, *rows = values
+    try:
+        idx_num = hdr.index("Numero")
+    except ValueError:
+        idx_num = 0
+    keys: set[str] = set()
+    for r in rows:
+        if idx_num < len(r):
+            key = _ignore_key(r[idx_num])
+            if key:
+                keys.add(key)
+    return keys
 
 
 _META_TAB = "_meta"

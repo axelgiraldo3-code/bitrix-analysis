@@ -127,7 +127,13 @@ def load_bitrix_month(year_month: str, force_refresh: bool = False) -> tuple[pd.
 
 def build_processed(bot_df: pd.DataFrame, bitrix_df: pd.DataFrame) -> pd.DataFrame:
     """Procesamiento base sin realimentación (mucho más barato)."""
-    df = cache.unify_recent(bot_df)
+    try:
+        ignored = sheets.load_ignored_phones()
+    except Exception as e:
+        st.warning(f"No se pudo leer la lista de números ignorados: {e}")
+        ignored = set()
+    df = cache.filter_ignored(bot_df, ignored)
+    df = cache.unify_recent(df)
     bitrix_sigs = set(bitrix_df["_phone_sig"].tolist()) if not bitrix_df.empty else set()
     df = cache.apply_auto_rules(df, bitrix_sigs)
     df = cache.overwrite_names_from_bitrix(df, bitrix_df)
@@ -264,7 +270,11 @@ def _sync_month_once(year_month: str, snapshot_hash: str) -> None:
     month_df = cache.filter_by_year_month(processed, year_month)
     if not month_df.empty:
         try:
-            sheets.sync_month_bot(year_month, month_df)
+            ignored = sheets.load_ignored_phones()
+        except Exception:
+            ignored = set()
+        try:
+            sheets.sync_month_bot(year_month, month_df, ignored_keys=ignored)
         except Exception as e:
             st.warning(f"No se pudo sincronizar el mes {year_month}: {e}")
 
@@ -562,12 +572,10 @@ with tab3:
             # KPIs rápidos
             total = len(b_month)
             nuevos = (b_month["Nuevo"].astype(str) == "Sí").sum()
-            perdidos = (b_month["Etapa"].astype(str) == "Cerrado Perdido").sum() + (b_month["Etapa"].astype(str) == "Cerrado Perdido, motivo?").sum()
-            k1, k2, k3, k4 = st.columns(4)
+            k1, k2, k3 = st.columns(3)
             k1.metric("Total con actividad", total)
             k2.metric("Nuevos del mes", int(nuevos))
             k3.metric("Reactivados / movidos", total - int(nuevos))
-            k4.metric("Cerrados",perdidos)
 
             listing = b_month[[
                 "Nuevo", "Fecha movimiento", "Fecha creacion", "Nombre negocio",
