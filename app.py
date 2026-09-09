@@ -354,36 +354,45 @@ def _tab1_body(month_df: pd.DataFrame, year_month: str) -> None:
     idx = sel_rows[0]
     row = month_df.iloc[idx]
 
-    st.markdown(
-        f"""
-        | Número | Nombre | Fecha | Área de interés |
-        |---|---|---|---|
-        | {row['Numero']} | {row['Nombre'] or '—'} | {row['Fecha']} | {row['Area de interes'] or '—'} |
-        """
-    )
-    st.markdown("**Resumen de la consulta**")
-    st.text_area(
-        "Resumen",
-        value=row["Resumen general"],
-        height=220,
-        label_visibility="collapsed",
-        disabled=True,
-    )
-
+    # --- Fila de detalle con clasificador incorporado ------------------------
+    # 4 columnas de datos + 1 col con el selectbox de clasificación +
+    # 1 col con el botón de guardar. El label del selectbox se colapsa para
+    # que la fila quede alineada con la cabecera.
     current_class = row["Clasificacion interna"] or CLASSIFICATION_OPTIONS[-1]
     try:
         default_idx = CLASSIFICATION_OPTIONS.index(current_class)
     except ValueError:
         default_idx = CLASSIFICATION_OPTIONS.index("SIN CLASIFICAR")
-    new_class = st.selectbox(
-        "Clasificación interna",
-        CLASSIFICATION_OPTIONS,
-        index=default_idx,
-    )
 
-    col_a, col_b = st.columns([1, 3])
-    with col_a:
-        if st.button("💾 Guardar clasificación", type="primary"):
+    col_widths = [2, 2, 1, 2, 3, 1]
+    header_cols = st.columns(col_widths)
+    for c, label in zip(
+        header_cols,
+        ["Número", "Nombre", "Fecha", "Área de interés",
+         "Clasificación interna", ""],
+    ):
+        c.markdown(
+            f"<div style='font-weight:700;color:{COTEAR_BLUE};"
+            f"font-size:0.85rem;'>{label}</div>",
+            unsafe_allow_html=True,
+        )
+
+    data_cols = st.columns(col_widths)
+    data_cols[0].markdown(f"**{row['Numero']}**")
+    data_cols[1].markdown(row["Nombre"] or "—")
+    data_cols[2].markdown(row["Fecha"])
+    data_cols[3].markdown(row["Area de interes"] or "—")
+    with data_cols[4]:
+        new_class = st.selectbox(
+            "Clasificación interna",
+            CLASSIFICATION_OPTIONS,
+            index=default_idx,
+            label_visibility="collapsed",
+            key=f"class_select_{row['Numero']}",
+        )
+    with data_cols[5]:
+        if st.button("💾", key=f"save_{row['Numero']}",
+                     type="primary", help="Guardar clasificación"):
             # No golpeamos Sheets: encolamos el cambio. La UI ya refleja el
             # valor porque apply_persisted() overlaya la cola en el próximo rerun.
             pending.add(str(row["Numero"]), {
@@ -393,12 +402,21 @@ def _tab1_body(month_df: pd.DataFrame, year_month: str) -> None:
             })
             st.toast(f"En cola: {row['Numero']} → {new_class}", icon="📥")
             st.rerun(scope="app")
-    with col_b:
-        num_key = str(row["Numero"])
-        if num_key in pending.get():
-            if st.button("↩️ Quitar de la cola", key=f"unqueue_{num_key}"):
-                pending.remove([num_key])
-                st.rerun(scope="app")
+
+    num_key = str(row["Numero"])
+    if num_key in pending.get():
+        if st.button("↩️ Quitar de la cola", key=f"unqueue_{num_key}"):
+            pending.remove([num_key])
+            st.rerun(scope="app")
+
+    st.markdown("**Resumen de la consulta**")
+    st.text_area(
+        "Resumen",
+        value=row["Resumen general"],
+        height=220,
+        label_visibility="collapsed",
+        disabled=True,
+    )
 
 
 with tab1:
