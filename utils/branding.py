@@ -30,6 +30,7 @@ BITRIX_STAGE_COLORS = {
     "Cotizado aguardando devolución":  "#39a8ef",
     "Cotizado aguardando devolucion":  "#39a8ef",
     "En negociacion":                  "#55d0e0",
+    "En negociación":                  "#55d0e0",
     "Ganado en Desarrollo":            "#47e4c2",
     "Ganado en desarrollo":            "#47e4c2",
     "Cerrado Ganado":                  "#7bd500",
