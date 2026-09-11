@@ -290,10 +290,10 @@ _sync_month_once(selected_month, _snapshot_key)
 # -----------------------------------------------------------------------------
 # Tabs
 # -----------------------------------------------------------------------------
-tab1, tab2, tab3 = st.tabs([
-    "Clasificación manual",
-    "Extracto mensual",
-    "Análisis Bitrix24",
+tab_reportes, tab_negocios, tab_clasif = st.tabs([
+    "Reportes Mensual (Extracto mensual)",
+    "Extracto Negocios (Análisis Bitrix24)",
+    "Clasificación Manual",
 ])
 
 
@@ -355,34 +355,33 @@ def _tab1_body(month_df: pd.DataFrame, year_month: str) -> None:
     row = month_df.iloc[idx]
 
     # --- Fila de detalle con clasificador incorporado ------------------------
-    # 4 columnas de datos + 1 col con el selectbox de clasificación +
-    # 1 col con el botón de guardar. El label del selectbox se colapsa para
-    # que la fila quede alineada con la cabecera.
+    # Layout: 4 cols de datos (Numero, Nombre, Fecha, Area) + 1 col con el
+    # selectbox de clasificación + 1 col con el botón de guardar. El label
+    # del selectbox se colapsa para que la fila quede alineada con la cabecera.
     current_class = row["Clasificacion interna"] or CLASSIFICATION_OPTIONS[-1]
     try:
         default_idx = CLASSIFICATION_OPTIONS.index(current_class)
     except ValueError:
         default_idx = CLASSIFICATION_OPTIONS.index("SIN CLASIFICAR")
 
-    col_widths = [2, 2, 1, 2, 3, 1]
-    header_cols = st.columns(col_widths)
-    for c, label in zip(
-        header_cols,
-        ["Número", "Nombre", "Fecha", "Área de interés",
-         "Clasificación interna", ""],
-    ):
-        c.markdown(
+    # Layout: tabla markdown (con bordes propios de markdown) a la izquierda
+    # con los 4 datos del reporte, y a la derecha el clasificador + botón de
+    # guardar como widgets aparte.
+    tbl_col, cls_col, btn_col = st.columns([6, 3, 1])
+    with tbl_col:
+        st.markdown(
+            f"""
+| Número | Nombre | Fecha | Área de interés |
+|---|---|---|---|
+| **{row['Numero']}** | {row['Nombre'] or '—'} | {row['Fecha']} | {row['Area de interes'] or '—'} |
+"""
+        )
+    with cls_col:
+        st.markdown(
             f"<div style='font-weight:700;color:{COTEAR_BLUE};"
-            f"font-size:0.85rem;'>{label}</div>",
+            f"font-size:0.85rem;margin-bottom:4px;'>Clasificación interna</div>",
             unsafe_allow_html=True,
         )
-
-    data_cols = st.columns(col_widths)
-    data_cols[0].markdown(f"**{row['Numero']}**")
-    data_cols[1].markdown(row["Nombre"] or "—")
-    data_cols[2].markdown(row["Fecha"])
-    data_cols[3].markdown(row["Area de interes"] or "—")
-    with data_cols[4]:
         new_class = st.selectbox(
             "Clasificación interna",
             CLASSIFICATION_OPTIONS,
@@ -390,7 +389,13 @@ def _tab1_body(month_df: pd.DataFrame, year_month: str) -> None:
             label_visibility="collapsed",
             key=f"class_select_{row['Numero']}",
         )
-    with data_cols[5]:
+    with btn_col:
+        # Espaciador para alinear el botón con el selectbox (que tiene su
+        # propia label chiquita arriba).
+        st.markdown(
+            "<div style='height:1.35rem'></div>",
+            unsafe_allow_html=True,
+        )
         if st.button("💾", key=f"save_{row['Numero']}",
                      type="primary", help="Guardar clasificación"):
             # No golpeamos Sheets: encolamos el cambio. La UI ya refleja el
@@ -419,17 +424,10 @@ def _tab1_body(month_df: pd.DataFrame, year_month: str) -> None:
     )
 
 
-with tab1:
-    _tab1_body(
-        cache.filter_by_year_month(processed, selected_month).copy(),
-        selected_month,
-    )
-
-
 # =============================================================================
-# TAB 2 — Extracto mensual y distribución
+# TAB 1 — Reportes Mensual (extracto mensual + distribución)
 # =============================================================================
-with tab2:
+with tab_reportes:
     st.subheader("Distribución de consultas del mes")
     month_df = cache.filter_by_year_month(processed, selected_month).copy()
     if month_df.empty:
@@ -490,9 +488,9 @@ with tab2:
 
 
 # =============================================================================
-# TAB 3 — Análisis Bitrix24
+# TAB 2 — Extracto Negocios (análisis Bitrix24)
 # =============================================================================
-with tab3:
+with tab_negocios:
     st.subheader("Actividad del mes")
     st.caption(
         f"Fuente: {'snapshot local' if bitrix_source == 'snapshot' else 'API Bitrix'}. "
@@ -584,7 +582,51 @@ with tab3:
                 },
             )
 
-            st.dataframe(pivot.reset_index(), hide_index=True, width="stretch")
+            # --- Distribución de motivos de baja ----------------------------
+            # Reemplaza la tabla pivote (ya visible en el gráfico apilado) por
+            # un análisis de los deals cerrados perdidos: qué motivos priman.
+            st.markdown("### Motivos de baja")
+            perdidos = b_month[
+                b_month["Motivo de baja"].astype(str).str.strip() != ""
+            ]
+            if perdidos.empty:
+                st.info("No hay deals cerrados perdidos con motivo cargado en el mes.")
+            else:
+                motivos = (perdidos["Motivo de baja"].astype(str).str.strip()
+                           .value_counts().reset_index())
+                motivos.columns = ["Motivo", "Cantidad"]
+                motivos["%"] = (motivos["Cantidad"] / motivos["Cantidad"].sum()
+                                * 100).round(1)
+
+                mc1, mc2 = st.columns([2, 1])
+                with mc1:
+                    fig_mot = px.pie(
+                        motivos,
+                        names="Motivo",
+                        values="Cantidad",
+                        hole=0.35,
+                    )
+                    fig_mot.update_layout(
+                        showlegend=True,
+                        height=420,
+                        margin=dict(t=40, b=40, l=40, r=40),
+                    )
+                    st.plotly_chart(
+                        fig_mot,
+                        width="stretch",
+                        config={
+                            "toImageButtonOptions": {
+                                "format": "png",
+                                "filename": f"motivos_baja_{selected_month}",
+                                "width": 1200,
+                                "height": 700,
+                                "scale": 2,
+                            },
+                            "displaylogo": False,
+                        },
+                    )
+                with mc2:
+                    st.dataframe(motivos, hide_index=True, width="stretch")
 
             st.markdown("### Lista de negociaciones con actividad en el mes")
             # KPIs rápidos
@@ -612,3 +654,13 @@ with tab3:
                 file_name=f"bitrix_actividad_{selected_month}.csv",
                 mime="text/csv",
             )
+
+
+# =============================================================================
+# TAB 3 — Clasificación Manual
+# =============================================================================
+with tab_clasif:
+    _tab1_body(
+        cache.filter_by_year_month(processed, selected_month).copy(),
+        selected_month,
+    )
