@@ -59,7 +59,7 @@ BOT_HEADERS = [
 BITRIX_HEADERS = [
     "ID negocio", "Fecha creacion", "Fecha movimiento", "Nuevo",
     "Nombre negocio", "Tipo maquinaria", "Etapa",
-    "Cliente", "Compania", "Telefono", "Motivo de baja",
+    "Cliente", "Compania", "Telefono", "Fuente", "Motivo de baja",
 ]
 
 
