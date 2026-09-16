@@ -505,11 +505,96 @@ with tab_negocios:
         b_month["_mov_dt"] = pd.to_datetime(
             b_month["Fecha movimiento"], format="%d-%m-%y", errors="coerce"
         )
+        b_month["_cre_dt"] = pd.to_datetime(
+            b_month["Fecha creacion"], format="%d-%m-%y", errors="coerce"
+        )
         b_month = b_month.sort_values("_mov_dt", ascending=False)
 
         if b_month.empty:
             st.info("Sin negocios en el mes seleccionado.")
         else:
+            # -----------------------------------------------------------------
+            # KPIs de cabecera — justo debajo del título "Actividad del mes"
+            # -----------------------------------------------------------------
+            etapas_norm = b_month["Etapa"].astype(str).str.strip().str.lower()
+            mask_ganado = etapas_norm.str.startswith("cerrado ganado")
+            mask_perdido = etapas_norm.str.startswith("cerrado perdido")
+            mask_cerrado = mask_ganado | mask_perdido
+
+            total = len(b_month)
+            nuevos = int((b_month["Nuevo"].astype(str) == "Sí").sum())
+            cerrados = int(mask_cerrado.sum())
+
+            # Fuente destacada: origen más frecuente entre los deals del mes.
+            # Snapshots viejos pueden no tener la columna → guardamos vs. eso.
+            if "Fuente" in b_month.columns:
+                fuentes_series = (
+                    b_month["Fuente"].astype(str).str.strip()
+                )
+                fuentes_series = fuentes_series[fuentes_series != ""]
+            else:
+                fuentes_series = pd.Series([], dtype=str)
+            if not fuentes_series.empty:
+                top_fuente = fuentes_series.value_counts()
+                fuente_top_label = str(top_fuente.index[0])
+                fuente_top_count = int(top_fuente.iloc[0])
+            else:
+                fuente_top_label = "—"
+                fuente_top_count = 0
+
+            # Motivo de baja más frecuente (solo perdidos con motivo cargado)
+            motivos_series = (
+                b_month.loc[mask_perdido, "Motivo de baja"]
+                .astype(str).str.strip()
+            )
+            motivos_series = motivos_series[motivos_series != ""]
+            if not motivos_series.empty:
+                top_motivo = motivos_series.value_counts()
+                motivo_top_label = str(top_motivo.index[0])
+                motivo_top_count = int(top_motivo.iloc[0])
+            else:
+                motivo_top_label = "—"
+                motivo_top_count = 0
+
+            # "Vida de negocio": días promedio desde creación hasta cierre
+            # (cerrado ganado o perdido) usando Fecha movimiento como fecha
+            # aproximada de cierre.
+            cerrados_df = b_month[mask_cerrado].copy()
+            vidas = (cerrados_df["_mov_dt"] - cerrados_df["_cre_dt"]).dt.days
+            vidas = vidas.dropna()
+            vidas = vidas[vidas >= 0]
+            if not vidas.empty:
+                vida_prom = float(vidas.mean())
+                vida_label = f"{vida_prom:.1f} días"
+                vida_help = f"Promedio sobre {len(vidas)} negocios cerrados"
+            else:
+                vida_label = "—"
+                vida_help = "Sin negocios cerrados con fechas válidas"
+
+            # Fila 1: actividad
+            r1c1, r1c2, r1c3 = st.columns(3)
+            r1c1.metric("Total con actividad", total)
+            r1c2.metric("Nuevos del mes", nuevos)
+            r1c3.metric(
+                "Fuente destacada",
+                fuente_top_label,
+                delta=(f"{fuente_top_count} negocios" if fuente_top_count else None),
+                delta_color="off",
+            )
+
+            # Fila 2: cierre y ciclo
+            r2c1, r2c2, r2c3 = st.columns(3)
+            r2c1.metric("Negocios cerrados", cerrados)
+            r2c2.metric(
+                "Motivo de baja más frecuente",
+                motivo_top_label,
+                delta=(f"{motivo_top_count} casos" if motivo_top_count else None),
+                delta_color="off",
+            )
+            r2c3.metric("Vida de negocio", vida_label, help=vida_help)
+
+            st.divider()
+
             # Tabla pivote maquinaria x etapa
             pivot = (b_month.groupby(["Tipo maquinaria", "Etapa"]).size()
                      .unstack(fill_value=0))
@@ -629,18 +714,13 @@ with tab_negocios:
                     st.dataframe(motivos, hide_index=True, width="stretch")
 
             st.markdown("### Lista de negociaciones con actividad en el mes")
-            # KPIs rápidos
-            total = len(b_month)
-            nuevos = (b_month["Nuevo"].astype(str) == "Sí").sum()
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Total con actividad", total)
-            k2.metric("Nuevos del mes", int(nuevos))
-            k3.metric("Reactivados / movidos", total - int(nuevos))
 
-            listing = b_month[[
+            listing_cols = [
                 "Nuevo", "Fecha movimiento", "Fecha creacion", "Nombre negocio",
-                "Cliente", "Compania", "Etapa", "Motivo de baja", "Telefono",
-            ]]
+                "Cliente", "Compania", "Etapa", "Fuente", "Motivo de baja",
+                "Telefono",
+            ]
+            listing = b_month[[c for c in listing_cols if c in b_month.columns]]
             st.dataframe(
                 style_bitrix_table(listing),
                 hide_index=True,
