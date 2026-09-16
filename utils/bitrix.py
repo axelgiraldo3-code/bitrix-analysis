@@ -336,9 +336,48 @@ def fetch_companies(company_ids: list[str]) -> dict[str, str]:
 DEAL_COLUMNS_OUT = [
     "ID negocio", "Fecha creacion", "Fecha movimiento", "Nuevo",
     "Nombre negocio", "Tipo maquinaria", "Etapa",
-    "Cliente", "Compania", "Telefono", "Motivo de baja",
+    "Cliente", "Compania", "Telefono", "Fuente", "Motivo de baja",
     "_phone_sig",
 ]
+
+
+# Etiquetas para SOURCE_ID estándar de Bitrix cuando el portal no personalizó
+# los labels. Se sobreescriben por `fetch_source_map()` si la llamada funciona.
+SOURCE_DEFAULT_LABELS = {
+    "CALL":        "Llamada",
+    "EMAIL":       "Email",
+    "WEB":         "Sitio Web",
+    "ADVERTISING": "Publicidad",
+    "PARTNER":     "Referido",
+    "RECOMMENDATION": "Recomendación",
+    "TRADE_SHOW":  "Feria / Exposición",
+    "WEBFORM":     "Formulario web",
+    "CALLBACK":    "Callback",
+    "RSS":         "RRSS",
+    "OTHER":       "Otro",
+    "UC_MOB_APP":  "App móvil",
+    "STORE":       "Tienda",
+    "SELF":        "Propio",
+}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_source_map() -> dict[str, str]:
+    """Devuelve {SOURCE_ID: label} desde crm.status.list (ENTITY_ID=SOURCE).
+
+    Cae al mapa por defecto si la llamada falla.
+    """
+    mp: dict[str, str] = dict(SOURCE_DEFAULT_LABELS)
+    try:
+        data = _call("crm.status.list", {"filter": {"ENTITY_ID": "SOURCE"}})
+        for s in data.get("result", []):
+            sid = str(s.get("STATUS_ID", "")).strip()
+            name = str(s.get("NAME", "")).strip()
+            if sid:
+                mp[sid] = name or mp.get(sid, sid)
+    except Exception:
+        pass
+    return mp
 
 
 def deals_to_dataframe(deals: list[dict], year_month: Optional[str] = None) -> pd.DataFrame:
@@ -413,6 +452,11 @@ def deals_to_dataframe(deals: list[dict], year_month: Optional[str] = None) -> p
                     break
         motivos.append(m)
 
+    # Fuente / origen del deal (SOURCE_ID → label legible)
+    source_map = fetch_source_map()
+    source_ids = col("SOURCE_ID").reindex(df.index).fillna("").tolist()
+    fuentes = [source_map.get(sid, sid) if sid else "" for sid in source_ids]
+
     out = pd.DataFrame({
         "ID negocio":       col("ID").reindex(df.index).fillna("").tolist(),
         "Fecha creacion":   fecha_series.dt.strftime("%d-%m-%y").fillna("").tolist(),
@@ -422,6 +466,7 @@ def deals_to_dataframe(deals: list[dict], year_month: Optional[str] = None) -> p
         "Etapa":            etapas,
         "Cliente":          clientes,
         "Compania":         companias,
+        "Fuente":           fuentes,
         "Motivo de baja":   motivos,
     })
 
