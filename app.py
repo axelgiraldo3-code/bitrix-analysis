@@ -12,7 +12,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from utils import bitrix, cache, pending, sheets
+from utils import bitrix, cache, pending, periods, sheets
 from utils.styling import style_bitrix_table, style_bot_table
 from utils.branding import (
     BITRIX_STAGE_COLORS,
@@ -123,6 +123,32 @@ def load_bitrix_month(year_month: str, force_refresh: bool = False) -> tuple[pd.
             return snap, "snapshot"
         st.warning(f"No se pudo leer Bitrix: {e}")
         return pd.DataFrame(), "error"
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_bitrix_period(year_months: tuple[str, ...],
+                        force_refresh: bool = False) -> tuple[pd.DataFrame, dict[str, str]]:
+    """Agrega varios meses de Bitrix (para trimestre/año/rango) en un solo df.
+
+    Devuelve (df, {year_month: origen}). Deduplica por 'ID negocio': un mismo
+    deal puede matchear el filtro de más de un mes (uno por DATE_CREATE, otro
+    por MOVED_TIME si fue creado y movido en meses distintos) — como Bitrix
+    sólo guarda el estado actual, ambas copias son idénticas y basta quedarse
+    con una.
+    """
+    frames: list[pd.DataFrame] = []
+    sources: dict[str, str] = {}
+    for ym in year_months:
+        df, src = load_bitrix_month(ym, force_refresh=force_refresh)
+        sources[ym] = src
+        if not df.empty:
+            frames.append(df)
+    if not frames:
+        return pd.DataFrame(), sources
+    out = pd.concat(frames, ignore_index=True)
+    if "ID negocio" in out.columns:
+        out = out.drop_duplicates(subset="ID negocio", keep="first")
+    return out, sources
 
 
 def build_processed(bot_df: pd.DataFrame, bitrix_df: pd.DataFrame) -> pd.DataFrame:
@@ -491,27 +517,117 @@ with tab_reportes:
 # TAB 2 — Extracto Negocios (análisis Bitrix24)
 # =============================================================================
 with tab_negocios:
-    st.subheader("Actividad del mes")
-    st.caption(
-        f"Fuente: {'snapshot local' if bitrix_source == 'snapshot' else 'API Bitrix'}. "
-        "Incluye deals **creados** en el mes o **movidos** de etapa en el mes "
-        "(los creados este mes se marcan 'Sí' en la columna Nuevo)."
+    st.subheader("Actividad del período")
+
+    # -------------------------------------------------------------------
+    # Selector de período: mes / trimestre / año / rango personalizado.
+    # Independiente del "Filtrar por mes" global (ese sigue rigiendo los
+    # Tabs de Reportes y Clasificación Manual).
+    # -------------------------------------------------------------------
+    period_type = st.radio(
+        "Período",
+        ["Mes", "Trimestre", "Año", "Rango personalizado"],
+        horizontal=True,
+        key="bitrix_period_type",
     )
-    if bitrix_df.empty:
-        st.info("No hay actividad de Bitrix para este mes.")
+
+    today = datetime.now().date()
+
+    if period_type == "Mes":
+        pmonth = st.selectbox("Mes", months_bot, index=0, key="bitrix_period_month")
+        range_start, range_end = periods.month_bounds(pmonth)
+    elif period_type == "Trimestre":
+        qc1, qc2 = st.columns(2)
+        with qc1:
+            pyear = int(st.number_input(
+                "Año", min_value=2015, max_value=today.year + 1,
+                value=today.year, step=1, key="bitrix_q_year",
+            ))
+        with qc2:
+            pquarter = st.selectbox(
+                "Trimestre", [1, 2, 3, 4],
+                index=periods.current_quarter(today) - 1,
+                format_func=lambda q: f"T{q}",
+                key="bitrix_q_num",
+            )
+        range_start, range_end = periods.quarter_bounds(pyear, pquarter)
+    elif period_type == "Año":
+        pyear = int(st.number_input(
+            "Año", min_value=2015, max_value=today.year + 1,
+            value=today.year, step=1, key="bitrix_y_year",
+        ))
+        range_start, range_end = periods.year_bounds(pyear)
+    else:  # Rango personalizado
+        rc1, rc2 = st.columns(2)
+        with rc1:
+            range_start = st.date_input(
+                "Desde", value=today.replace(day=1), key="bitrix_range_start",
+            )
+        with rc2:
+            range_end = st.date_input("Hasta", value=today, key="bitrix_range_end")
+        if range_start > range_end:
+            st.error("'Desde' no puede ser posterior a 'Hasta'.")
+            st.stop()
+
+    period_months = tuple(periods.year_months_spanning(range_start, range_end))
+    period_label = f"{range_start.strftime('%d-%m-%y')}_a_{range_end.strftime('%d-%m-%y')}"
+
+    force_refresh_period = st.button(
+        "🔄 Recargar período desde API",
+        help="Fuerza traer todos los meses del período desde Bitrix24 "
+             "(ignora snapshots). Puede tardar si el período es largo.",
+        key="bitrix_period_refresh",
+    )
+    if force_refresh_period:
+        load_bitrix_month.clear()
+        load_bitrix_period.clear()
+        st.rerun()
+
+    with st.spinner(f"Cargando {len(period_months)} mes(es) de Bitrix…"):
+        period_df, period_sources = load_bitrix_period(period_months, force_refresh=False)
+
+    _n_api = sum(1 for s in period_sources.values() if s == "api")
+    _n_snap = sum(1 for s in period_sources.values() if s == "snapshot")
+    st.caption(
+        f"Período: {range_start.strftime('%d-%m-%y')} a {range_end.strftime('%d-%m-%y')} "
+        f"({len(period_months)} mes(es) — {_n_snap} desde snapshot, {_n_api} desde API). "
+        "Incluye deals **creados** o **movidos** de etapa dentro del período "
+        "(los creados en el período se marcan 'Sí' en la columna Nuevo)."
+    )
+
+    if period_df.empty:
+        st.info("No hay actividad de Bitrix para este período.")
     else:
-        b_month = bitrix_df.copy()
-        # Orden por fecha de movimiento descendente
+        b_month = period_df.copy()
         b_month["_mov_dt"] = pd.to_datetime(
             b_month["Fecha movimiento"], format="%d-%m-%y", errors="coerce"
         )
         b_month["_cre_dt"] = pd.to_datetime(
             b_month["Fecha creacion"], format="%d-%m-%y", errors="coerce"
         )
+
+        # El fetch por mes trae deals con actividad en ESE mes; para
+        # trimestre/año/rango hay que recortar a los límites exactos del
+        # período (los meses de punta pueden traer días fuera de rango).
+        _start_ts = pd.Timestamp(range_start)
+        _end_ts = pd.Timestamp(range_end)
+        _in_range = (
+            ((b_month["_cre_dt"] >= _start_ts) & (b_month["_cre_dt"] <= _end_ts)) |
+            ((b_month["_mov_dt"] >= _start_ts) & (b_month["_mov_dt"] <= _end_ts))
+        )
+        b_month = b_month[_in_range].copy()
+
+        # Recalcular 'Nuevo' en función del período completo: el flag que
+        # trae cada fetch mensual está atado al mes individual, no al
+        # período agregado.
+        _mask_new = (b_month["_cre_dt"] >= _start_ts) & (b_month["_cre_dt"] <= _end_ts)
+        b_month["Nuevo"] = _mask_new.map({True: "Sí", False: ""})
+
+        # Orden por fecha de movimiento descendente
         b_month = b_month.sort_values("_mov_dt", ascending=False)
 
         if b_month.empty:
-            st.info("Sin negocios en el mes seleccionado.")
+            st.info("Sin negocios en el período seleccionado.")
         else:
             # -----------------------------------------------------------------
             # KPIs de cabecera — justo debajo del título "Actividad del mes"
@@ -658,7 +774,7 @@ with tab_negocios:
                 config={
                     "toImageButtonOptions": {
                         "format": "png",
-                        "filename": f"actividad_{selected_month}",
+                        "filename": f"actividad_{period_label}",
                         "width": 1400,
                         "height": 700,
                         "scale": 2,
@@ -675,7 +791,7 @@ with tab_negocios:
                 b_month["Motivo de baja"].astype(str).str.strip() != ""
             ]
             if perdidos.empty:
-                st.info("No hay deals cerrados perdidos con motivo cargado en el mes.")
+                st.info("No hay deals cerrados perdidos con motivo cargado en el período.")
             else:
                 motivos = (perdidos["Motivo de baja"].astype(str).str.strip()
                            .value_counts().reset_index())
@@ -702,7 +818,7 @@ with tab_negocios:
                         config={
                             "toImageButtonOptions": {
                                 "format": "png",
-                                "filename": f"motivos_baja_{selected_month}",
+                                "filename": f"motivos_baja_{period_label}",
                                 "width": 1200,
                                 "height": 700,
                                 "scale": 2,
@@ -713,7 +829,7 @@ with tab_negocios:
                 with mc2:
                     st.dataframe(motivos, hide_index=True, width="stretch")
 
-            st.markdown("### Lista de negociaciones con actividad en el mes")
+            st.markdown("### Lista de negociaciones con actividad en el período")
 
             listing_cols = [
                 "Nuevo", "Fecha movimiento", "Fecha creacion", "Nombre negocio",
@@ -729,9 +845,9 @@ with tab_negocios:
 
             csv = listing.to_csv(index=False).encode("utf-8")
             st.download_button(
-                "⬇️ Descargar actividad del mes (CSV)",
+                "⬇️ Descargar actividad del período (CSV)",
                 data=csv,
-                file_name=f"bitrix_actividad_{selected_month}.csv",
+                file_name=f"bitrix_actividad_{period_label}.csv",
                 mime="text/csv",
             )
 
