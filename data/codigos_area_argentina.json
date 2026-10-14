@@ -1,5 +1,5 @@
 {
- "descripcion": "Códigos de área argentinos (sin 0) → provincia. 11 se informa como AMBA porque cubre CABA y GBA.",
+ "descripcion": "Códigos de área argentinos (sin 0) → provincia. 11 (CABA y GBA) se agrupa como Buenos Aires.",
  "fuente": "https://caracteristicatelefonica.com/ (consultado 2026-10-13). Códigos 2362, 2365, 2401, 2402, 2405, 2407, 2494, 2495, 2652, 3364, 3624, 3644, 3783 y 3822 asignados por su prefijo de 3 dígitos.",
  "codes": {
   "2202": "Buenos Aires",
@@ -315,6 +315,6 @@
   "385": "Santiago del Estero",
   "387": "Salta",
   "388": "Jujuy",
-  "11": "AMBA (CABA y GBA)"
+  "11": "Buenos Aires"
  }
 }

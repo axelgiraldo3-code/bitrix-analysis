@@ -27,7 +27,7 @@ def test_significant_ar_compares_last_10_digits():
 
 @pytest.mark.parametrize("raw, prov", [
     ("5493516868753", "Córdoba"),
-    ("5491155891098", "AMBA (CABA y GBA)"),
+    ("5491155891098", "Buenos Aires"),
     ("5493416868753", "Santa Fe"),
     ("5492974170867", "Chubut"),
     ("5934987654321", "Extranjero"),

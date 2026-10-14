@@ -49,7 +49,7 @@ tests/                      Pruebas de funciones puras (pytest)
 ## Tabs
 
 - **Reporte mensual**: indicadores (provincia y área principal, % sin
-  respuesta y sin interés), torta por clasificación, barras área de interés ×
+  interés real = sin respuestas + sin interés), torta por clasificación, barras área de interés ×
   clasificación, torta por provincia y extracto descargable.
 - **Negocios Bitrix24**: período libre (mes, trimestre, año, rango), KPIs,
   barras tipo de máquina × etapa (% o cantidad) con su tabla, motivos de baja,

@@ -50,6 +50,11 @@ def _png_config(filename: str) -> dict:
     }
 
 
+def section(name: str):
+    """Contenedor con marco y fondo suave para separar visualmente cada sección."""
+    return st.container(border=True, key=f"seccion_{name}")
+
+
 def _csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode(CSV_ENCODING)
 
@@ -62,6 +67,15 @@ st.markdown(
       .stTabs [data-baseweb="tab"] {{ font-weight: 700; }}
       .stTabs [aria-selected="true"] {{ color: {COTEAR_BLUE}; }}
       .cotear-muted {{ color: {COTEAR_GRAY}; font-size: 0.9rem; }}
+      /* Marco de secciones (st.container con key "seccion_*") */
+      div[class*="st-key-seccion_"] {{
+        background-color: #FAFBFC;
+        border: none !important;
+        border-radius: 16px !important;
+        padding: 1.25rem 1.5rem 1rem 1.5rem;
+        margin-bottom: 0.75rem;
+      }}
+      div[class*="st-key-seccion_"] h3 {{ margin-top: 0; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -381,7 +395,8 @@ def _zone_pie(counts: pd.DataFrame, filename: str, height: int = 420) -> None:
                      color="Zona", color_discrete_map=colors,
                      color_discrete_sequence=px.colors.qualitative.Safe)
         fig.update_traces(sort=False)
-        fig.update_layout(height=height, margin=dict(t=30, b=30, l=30, r=30))
+        fig.update_layout(height=height, margin=dict(t=30, b=30, l=30, r=30),
+                          paper_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig, width="stretch", config=_png_config(filename))
     with c2:
         st.dataframe(counts, hide_index=True, width="stretch")
@@ -397,8 +412,7 @@ with tab_reportes:
     else:
         total = len(month_df)
         cls = month_df["Clasificacion interna"].astype(str)
-        pct_sin_resp = (cls == "SIN RESPUESTAS").mean() * 100
-        pct_sin_int = (cls == "SIN INTERES").mean() * 100
+        pct_sin_interes_real = cls.isin(["SIN RESPUESTAS", "SIN INTERES"]).mean() * 100
         zona_top, zona_n = geo.top_province(month_df["Zona"])
         areas_id = month_df.loc[month_df["Area"] != cache.AREA_NO_IDENTIFICADA, "Area"]
         if areas_id.empty:
@@ -407,81 +421,84 @@ with tab_reportes:
             vc = areas_id.value_counts()
             area_top, area_n = str(vc.index[0]), int(vc.iloc[0])
 
-        k1, k2, k3, k4, k5 = st.columns(5)
-        k1.metric("Consultas del mes", total)
-        k2.metric("Provincia con más consultas", zona_top,
-                  delta=f"{zona_n} consultas" if zona_n else None, delta_color="off")
-        k3.metric("Área de interés principal", area_top,
-                  delta=f"{area_n} consultas" if area_n else None, delta_color="off")
-        k4.metric("Sin respuesta", f"{pct_sin_resp:.1f} %",
-                  help="% de consultas clasificadas SIN RESPUESTAS")
-        k5.metric("Sin interés", f"{pct_sin_int:.1f} %",
-                  help="% de consultas clasificadas SIN INTERES (spam, ofrecimientos, extranjeros)")
-
-        st.divider()
+        with section("kpis_reporte"):
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Consultas del mes", total)
+            k2.metric("Provincia con más consultas", zona_top,
+                      delta=f"{zona_n} consultas" if zona_n else None, delta_color="off")
+            k3.metric("Área de interés principal", area_top,
+                      delta=f"{area_n} consultas" if area_n else None, delta_color="off")
+            k4.metric("Sin interés real", f"{pct_sin_interes_real:.1f} %",
+                      help="% de consultas clasificadas SIN RESPUESTAS o SIN INTERES")
 
         # --- Distribución por clasificación ------------------------------
-        st.markdown("### Distribución por clasificación")
-        counts = cls.value_counts().reset_index()
-        counts.columns = ["Clasificación", "Cantidad"]
-        counts["%"] = (counts["Cantidad"] / counts["Cantidad"].sum() * 100).round(1)
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            fig = px.pie(counts, names="Clasificación", values="Cantidad",
-                         color="Clasificación", color_discrete_map=CLASSIFICATION_COLORS,
-                         hole=0.35)
-            fig.update_layout(height=440, margin=dict(t=30, b=30, l=30, r=30))
-            st.plotly_chart(fig, width="stretch",
-                            config=_png_config(f"clasificaciones_{selected_month}"))
-        with c2:
-            st.dataframe(counts, hide_index=True, width="stretch")
+        with section("distribucion"):
+            st.markdown("### Distribución por clasificación")
+            counts = cls.value_counts().reset_index()
+            counts.columns = ["Clasificación", "Cantidad"]
+            counts["%"] = (counts["Cantidad"] / counts["Cantidad"].sum() * 100).round(1)
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                fig = px.pie(counts, names="Clasificación", values="Cantidad",
+                             color="Clasificación", color_discrete_map=CLASSIFICATION_COLORS,
+                             hole=0.35)
+                fig.update_layout(height=440, margin=dict(t=30, b=30, l=30, r=30),
+                                  paper_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig, width="stretch",
+                                config=_png_config(f"clasificaciones_{selected_month}"))
+            with c2:
+                st.dataframe(counts, hide_index=True, width="stretch")
 
         # --- Área de interés × clasificación -----------------------------
-        st.markdown("### Área de interés por clasificación")
-        area_pivot = (month_df.groupby(["Area", "Clasificacion interna"]).size()
-                      .unstack(fill_value=0)
-                      .reindex(index=cache.AREA_BUCKETS, fill_value=0))
-        area_pivot = area_pivot[[c for c in CLASSIFICATION_OPTIONS if c in area_pivot.columns]]
-        area_long = area_pivot.reset_index().melt(
-            id_vars="Area", var_name="Clasificación", value_name="Cantidad")
-        area_long["label"] = area_long["Cantidad"].map(lambda v: str(int(v)) if v > 0 else "")
-        fig_area = px.bar(
-            area_long, x="Area", y="Cantidad", color="Clasificación", text="label",
-            color_discrete_map=CLASSIFICATION_COLORS,
-            category_orders={"Area": cache.AREA_BUCKETS,
-                             "Clasificación": CLASSIFICATION_OPTIONS},
-        )
-        fig_area.update_layout(barmode="stack", height=460, xaxis_title="",
-                               yaxis_title="Consultas",
-                               margin=dict(t=30, b=40, l=60, r=30))
-        fig_area.update_traces(textposition="inside")
-        st.plotly_chart(fig_area, width="stretch",
-                        config=_png_config(f"area_clasificacion_{selected_month}"))
-        area_table = area_pivot.copy()
-        area_table["Total"] = area_table.sum(axis=1)
-        st.dataframe(area_table.reset_index().rename(columns={"Area": "Área de interés"}),
-                     hide_index=True, width="stretch")
-        st.caption("Áreas sin texto o sin coincidencia con Máquinas, Repuestos o "
-                   "Servicio Técnico se cuentan como No identificado.")
+        with section("area"):
+            st.markdown("### Área de interés por clasificación")
+            area_pivot = (month_df.groupby(["Area", "Clasificacion interna"]).size()
+                          .unstack(fill_value=0)
+                          .reindex(index=cache.AREA_BUCKETS, fill_value=0))
+            area_pivot = area_pivot[[c for c in CLASSIFICATION_OPTIONS if c in area_pivot.columns]]
+            area_long = area_pivot.reset_index().melt(
+                id_vars="Area", var_name="Clasificación", value_name="Cantidad")
+            area_long["label"] = area_long["Cantidad"].map(lambda v: str(int(v)) if v > 0 else "")
+            fig_area = px.bar(
+                area_long, x="Area", y="Cantidad", color="Clasificación", text="label",
+                color_discrete_map=CLASSIFICATION_COLORS,
+                category_orders={"Area": cache.AREA_BUCKETS,
+                                 "Clasificación": CLASSIFICATION_OPTIONS},
+            )
+            fig_area.update_layout(barmode="stack", height=460, xaxis_title="",
+                                   yaxis_title="Consultas",
+                                   margin=dict(t=30, b=40, l=60, r=30),
+                                   paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            fig_area.update_traces(textposition="inside")
+            st.plotly_chart(fig_area, width="stretch",
+                            config=_png_config(f"area_clasificacion_{selected_month}"))
+            area_table = area_pivot.copy()
+            area_table["Total"] = area_table.sum(axis=1)
+            st.dataframe(area_table.reset_index().rename(columns={"Area": "Área de interés"}),
+                         hide_index=True, width="stretch")
+            st.caption("Áreas sin texto o sin coincidencia con Máquinas, Repuestos o "
+                       "Servicio Técnico se cuentan como No identificado.")
 
         # --- Zonas geográficas -------------------------------------------
-        st.markdown("### Consultas por provincia")
-        _zone_pie(geo.zone_counts(month_df["Zona"]), f"zonas_consultas_{selected_month}")
-        st.caption("Provincia según el código de área del teléfono. Las provincias "
-                   "más chicas se agrupan en Otros mientras sumen menos del 10 %.")
+        with section("zonas_consultas"):
+            st.markdown("### Consultas por provincia")
+            _zone_pie(geo.zone_counts(month_df["Zona"]), f"zonas_consultas_{selected_month}")
+            st.caption("Provincia según el código de área del teléfono. Las provincias "
+                       "más chicas se agrupan en Otros mientras sumen menos del 10 %.")
 
-        # --- Tabla de datos (desplegable) --------------------------------
-        display_cols = ["Fecha", "Nombre", "Numero", "Zona", "Area de interes",
-                        "Clasificacion interna"]
-        with st.expander(f"Tabla de datos con clasificación agregada ({total} consultas)"):
+        # --- Tabla de datos ----------------------------------------------
+        with section("tabla_consultas"):
+            st.markdown(f"### Tabla de datos con clasificación agregada ({total} consultas)")
+            display_cols = ["Fecha", "Nombre", "Numero", "Zona", "Area de interes",
+                            "Clasificacion interna"]
             st.dataframe(style_bot_table(month_df[display_cols]),
                          hide_index=True, width="stretch")
-        st.download_button(
-            "⬇️ Descargar extracto mensual (CSV)",
-            data=_csv(month_df[display_cols + ["Area"]]),
-            file_name=f"extracto_{selected_month}.csv",
-            mime="text/csv",
-        )
+            st.download_button(
+                "⬇️ Descargar extracto mensual (CSV)",
+                data=_csv(month_df[display_cols + ["Area"]]),
+                file_name=f"extracto_{selected_month}.csv",
+                mime="text/csv",
+            )
 
 
 # =============================================================================
@@ -595,105 +612,109 @@ with tab_negocios:
 
             zona_top_b, zona_n_b = geo.top_province(b["Zona"])
 
-            r1 = st.columns(4)
-            r1[0].metric("Total con actividad", len(b))
-            r1[1].metric("Nuevos del período", int((b["Nuevo"] == "Sí").sum()))
-            r1[2].metric("Fuente destacada", fuente_top,
-                         delta=f"{fuente_n} negocios" if fuente_n else None, delta_color="off")
-            r1[3].metric("Provincia con más negocios", zona_top_b,
-                         delta=f"{zona_n_b} negocios" if zona_n_b else None, delta_color="off")
-            r2 = st.columns(4)
-            r2[0].metric("Negocios cerrados", int(mask_cerrado.sum()))
-            r2[1].metric("Ganados", int(mask_ganado.sum()))
-            r2[2].metric("Motivo de baja más frecuente", motivo_top,
-                         delta=f"{motivo_n} casos" if motivo_n else None, delta_color="off")
-            r2[3].metric("Vida de negocio", vida_label, help=vida_help)
-
-            st.divider()
+            with section("kpis_negocios"):
+                r1 = st.columns(4)
+                r1[0].metric("Total con actividad", len(b))
+                r1[1].metric("Nuevos del período", int((b["Nuevo"] == "Sí").sum()))
+                r1[2].metric("Fuente destacada", fuente_top,
+                             delta=f"{fuente_n} negocios" if fuente_n else None, delta_color="off")
+                r1[3].metric("Provincia con más negocios", zona_top_b,
+                             delta=f"{zona_n_b} negocios" if zona_n_b else None, delta_color="off")
+                r2 = st.columns(4)
+                r2[0].metric("Negocios cerrados", int(mask_cerrado.sum()))
+                r2[1].metric("Ganados", int(mask_ganado.sum()))
+                r2[2].metric("Motivo de baja más frecuente", motivo_top,
+                             delta=f"{motivo_n} casos" if motivo_n else None, delta_color="off")
+                r2[3].metric("Vida de negocio", vida_label, help=vida_help)
 
             # --- Tipo de máquina × etapa -------------------------------------
-            st.markdown("### Negocios por tipo de máquina y etapa")
-            pivot = b.groupby(["Tipo maquinaria", "Etapa"]).size().unstack(fill_value=0)
-            ordered = [c for c in BITRIX_STAGE_ORDER if c in pivot.columns] + \
-                      [c for c in pivot.columns if c not in BITRIX_STAGE_ORDER]
-            pivot = pivot[ordered]
-            pivot["Total"] = pivot.sum(axis=1)
-            pivot = pivot.sort_values("Total", ascending=False)
+            with section("maquina_etapa"):
+                st.markdown("### Negocios por tipo de máquina y etapa")
+                pivot = b.groupby(["Tipo maquinaria", "Etapa"]).size().unstack(fill_value=0)
+                ordered = [c for c in BITRIX_STAGE_ORDER if c in pivot.columns] + \
+                          [c for c in pivot.columns if c not in BITRIX_STAGE_ORDER]
+                pivot = pivot[ordered]
+                pivot["Total"] = pivot.sum(axis=1)
+                pivot = pivot.sort_values("Total", ascending=False)
 
-            modo = st.radio("Mostrar", ["Porcentaje", "Cantidad"], horizontal=True,
-                            key="bitrix_bar_mode")
-            long = pivot.drop(columns=["Total"]).reset_index().melt(
-                id_vars="Tipo maquinaria", var_name="Etapa", value_name="Cantidad")
-            long["Total maquinaria"] = long["Tipo maquinaria"].map(pivot["Total"].to_dict())
-            long["%"] = (long["Cantidad"] / long["Total maquinaria"] * 100).round(1)
-            if modo == "Porcentaje":
-                long["label"] = long["%"].map(lambda v: f"{v:.0f}%" if v > 0 else "")
-            else:
-                long["label"] = long["Cantidad"].map(lambda v: str(int(v)) if v > 0 else "")
-            fig = px.bar(
-                long, x="Tipo maquinaria", y="%" if modo == "Porcentaje" else "Cantidad",
-                color="Etapa", text="label", color_discrete_map=BITRIX_STAGE_COLORS,
-                category_orders={"Etapa": BITRIX_STAGE_ORDER,
-                                 "Tipo maquinaria": pivot.index.tolist()},
-                custom_data=["Cantidad", "%", "Total maquinaria"],
-            )
-            fig.update_layout(
-                barmode="stack", height=500, xaxis_title="",
-                yaxis_title="% dentro del tipo" if modo == "Porcentaje" else "Cantidad de negocios",
-                margin=dict(t=40, b=110, l=70, r=40),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="left", x=0),
-                xaxis=dict(tickangle=-25),
-            )
-            fig.update_traces(
-                textposition="inside",
-                hovertemplate=("<b>%{x}</b><br>Etapa: %{fullData.name}<br>"
-                               "Cantidad: %{customdata[0]} de %{customdata[2]}<br>"
-                               "%{customdata[1]}% del tipo<extra></extra>"),
-            )
-            st.plotly_chart(fig, width="stretch", config=_png_config(f"actividad_{period_label}"))
-            st.dataframe(pivot.reset_index(), hide_index=True, width="stretch")
+                modo = st.radio("Mostrar", ["Porcentaje", "Cantidad"], horizontal=True,
+                                key="bitrix_bar_mode")
+                long = pivot.drop(columns=["Total"]).reset_index().melt(
+                    id_vars="Tipo maquinaria", var_name="Etapa", value_name="Cantidad")
+                long["Total maquinaria"] = long["Tipo maquinaria"].map(pivot["Total"].to_dict())
+                long["%"] = (long["Cantidad"] / long["Total maquinaria"] * 100).round(1)
+                if modo == "Porcentaje":
+                    long["label"] = long["%"].map(lambda v: f"{v:.0f}%" if v > 0 else "")
+                else:
+                    long["label"] = long["Cantidad"].map(lambda v: str(int(v)) if v > 0 else "")
+                fig = px.bar(
+                    long, x="Tipo maquinaria", y="%" if modo == "Porcentaje" else "Cantidad",
+                    color="Etapa", text="label", color_discrete_map=BITRIX_STAGE_COLORS,
+                    category_orders={"Etapa": BITRIX_STAGE_ORDER,
+                                     "Tipo maquinaria": pivot.index.tolist()},
+                    custom_data=["Cantidad", "%", "Total maquinaria"],
+                )
+                fig.update_layout(
+                    barmode="stack", height=500, xaxis_title="",
+                    yaxis_title="% dentro del tipo" if modo == "Porcentaje" else "Cantidad de negocios",
+                    margin=dict(t=40, b=110, l=70, r=40),
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="left", x=0),
+                    xaxis=dict(tickangle=-25),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                )
+                fig.update_traces(
+                    textposition="inside",
+                    hovertemplate=("<b>%{x}</b><br>Etapa: %{fullData.name}<br>"
+                                   "Cantidad: %{customdata[0]} de %{customdata[2]}<br>"
+                                   "%{customdata[1]}% del tipo<extra></extra>"),
+                )
+                st.plotly_chart(fig, width="stretch", config=_png_config(f"actividad_{period_label}"))
+                st.dataframe(pivot.reset_index(), hide_index=True, width="stretch")
 
             # --- Motivos de baja ---------------------------------------------
-            st.markdown("### Motivos de baja")
-            perdidos = b[b["Motivo de baja"].astype(str).str.strip() != ""]
-            if perdidos.empty:
-                st.info("No hay negocios perdidos con motivo cargado en el período.")
-            else:
-                motivos = (perdidos["Motivo de baja"].astype(str).str.strip()
-                           .value_counts().reset_index())
-                motivos.columns = ["Motivo", "Cantidad"]
-                motivos["%"] = (motivos["Cantidad"] / motivos["Cantidad"].sum() * 100).round(1)
-                mc1, mc2 = st.columns([2, 1])
-                with mc1:
-                    fig_mot = px.pie(motivos, names="Motivo", values="Cantidad", hole=0.35)
-                    fig_mot.update_layout(height=420, margin=dict(t=30, b=30, l=30, r=30))
-                    st.plotly_chart(fig_mot, width="stretch",
-                                    config=_png_config(f"motivos_baja_{period_label}"))
-                with mc2:
-                    st.dataframe(motivos, hide_index=True, width="stretch")
+            with section("motivos"):
+                st.markdown("### Motivos de baja")
+                perdidos = b[b["Motivo de baja"].astype(str).str.strip() != ""]
+                if perdidos.empty:
+                    st.info("No hay negocios perdidos con motivo cargado en el período.")
+                else:
+                    motivos = (perdidos["Motivo de baja"].astype(str).str.strip()
+                               .value_counts().reset_index())
+                    motivos.columns = ["Motivo", "Cantidad"]
+                    motivos["%"] = (motivos["Cantidad"] / motivos["Cantidad"].sum() * 100).round(1)
+                    mc1, mc2 = st.columns([2, 1])
+                    with mc1:
+                        fig_mot = px.pie(motivos, names="Motivo", values="Cantidad", hole=0.35)
+                        fig_mot.update_layout(height=420, margin=dict(t=30, b=30, l=30, r=30),
+                                              paper_bgcolor="rgba(0,0,0,0)")
+                        st.plotly_chart(fig_mot, width="stretch",
+                                        config=_png_config(f"motivos_baja_{period_label}"))
+                    with mc2:
+                        st.dataframe(motivos, hide_index=True, width="stretch")
 
             # --- Zonas geográficas -------------------------------------------
-            st.markdown("### Negocios por provincia")
-            _zone_pie(geo.zone_counts(b["Zona"]), f"zonas_negocios_{period_label}")
-            st.caption("Provincia según el código de área del teléfono del contacto. "
-                       "Sin identificar incluye contactos sin teléfono o con email.")
+            with section("zonas_negocios"):
+                st.markdown("### Negocios por provincia")
+                _zone_pie(geo.zone_counts(b["Zona"]), f"zonas_negocios_{period_label}")
+                st.caption("Provincia según el código de área del teléfono del contacto. "
+                           "Sin identificar incluye contactos sin teléfono o con email.")
 
             # --- Lista --------------------------------------------------------
-            listing_cols = [
-                "Nuevo", "Fecha movimiento", "Fecha creacion", "Nombre negocio",
-                "Cliente", "Compania", "Etapa", "Etapa anterior", "Fuente",
-                "Motivo de baja", "Telefono", "Zona",
-            ]
-            listing = b[[c for c in listing_cols if c in b.columns]]
-            with st.expander(f"Lista de negociaciones con actividad en el período ({len(listing)})",
-                             expanded=True):
+            with section("lista_negocios"):
+                listing_cols = [
+                    "Nuevo", "Fecha movimiento", "Fecha creacion", "Nombre negocio",
+                    "Cliente", "Compania", "Etapa", "Etapa anterior", "Fuente",
+                    "Motivo de baja", "Telefono", "Zona",
+                ]
+                listing = b[[c for c in listing_cols if c in b.columns]]
+                st.markdown(f"### Lista de negociaciones con actividad en el período ({len(listing)})")
                 st.dataframe(style_bitrix_table(listing), hide_index=True, width="stretch")
-            st.download_button(
-                "⬇️ Descargar actividad del período (CSV)",
-                data=_csv(listing),
-                file_name=f"bitrix_actividad_{period_label}.csv",
-                mime="text/csv",
-            )
+                st.download_button(
+                    "⬇️ Descargar actividad del período (CSV)",
+                    data=_csv(listing),
+                    file_name=f"bitrix_actividad_{period_label}.csv",
+                    mime="text/csv",
+                )
 
 
 # =============================================================================
