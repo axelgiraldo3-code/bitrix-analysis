@@ -16,3 +16,13 @@ data/*.tmp
 Thumbs.db
 .vscode/
 .idea/
+
+# Datos de contactos y cachés locales: nunca versionar
+data/cache/
+data/pending_changes.json
+data/*.csv
+data/excluded_phones.json
+data/first_deal.json
+data/stages_map.json
+data/deal_*.json
+data/userfields*.json

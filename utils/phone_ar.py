@@ -1,8 +1,11 @@
-"""Normalización y formateo de números telefónicos argentinos.
+"""Normalización, formateo y zona geográfica de números telefónicos argentinos.
 
-Formato objetivo: '+54 9 (XXX) XXXX-XXXX' donde el (XXX) puede ser 2, 3 o 4 dígitos
-según el código de área. Si no es argentino, se devuelve el número tal cual
+Formato objetivo: '+54 9 <area> <local>' donde el área puede tener 2, 3 o 4
+dígitos según el código. Si no es argentino, se devuelve el número tal cual
 (con '+' inicial si corresponde) sin formateo.
+
+`data/codigos_area_argentina.json` mapea cada código de área a su provincia;
+`province_of()` usa ese mapa para el análisis geográfico.
 """
 from __future__ import annotations
 
@@ -14,32 +17,39 @@ from typing import Optional
 
 _DIGITS = re.compile(r"\D+")
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-_CODES_CACHE: Optional[list[str]] = None
+_CODES_CACHE: Optional[dict[str, str]] = None
+_SORTED_CODES: Optional[list[str]] = None
+
+ZONE_FOREIGN = "Extranjero"
+ZONE_UNKNOWN = "Sin identificar"
 
 
-def _load_area_codes() -> list[str]:
-    global _CODES_CACHE
+def _load_area_codes() -> dict[str, str]:
+    """Devuelve {codigo: provincia}. Acepta el formato viejo (lista de códigos)."""
+    global _CODES_CACHE, _SORTED_CODES
     if _CODES_CACHE is not None:
         return _CODES_CACHE
     path = _DATA_DIR / "codigos_area_argentina.json"
-    if not path.exists():
-        _CODES_CACHE = []
-        return _CODES_CACHE
-    with path.open("r", encoding="utf-8") as fh:
-        data = json.load(fh)
-    # Aceptamos tanto {"codes": [...]} como una lista directa o {"XXX": "Ciudad", ...}
-    if isinstance(data, dict):
-        if "codes" in data and isinstance(data["codes"], list):
-            codes = [str(c) for c in data["codes"]]
-        else:
-            codes = list(data.keys())
-    elif isinstance(data, list):
-        codes = [str(c) for c in data]
+    data: object = {}
+    if path.exists():
+        with path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    raw = data.get("codes", data) if isinstance(data, dict) else data
+    if isinstance(raw, dict):
+        codes = {str(k): str(v) for k, v in raw.items()}
+    elif isinstance(raw, list):
+        codes = {str(c): "" for c in raw}
     else:
-        codes = []
-    # Ordenar por longitud descendente para que el matching prefiera 4>3>2 dígitos
-    _CODES_CACHE = sorted({c for c in codes if c.isdigit()}, key=len, reverse=True)
+        codes = {}
+    _CODES_CACHE = {c: p for c, p in codes.items() if c.isdigit()}
+    # Longitud descendente: el matching prefiere 4 > 3 > 2 dígitos
+    _SORTED_CODES = sorted(_CODES_CACHE, key=len, reverse=True)
     return _CODES_CACHE
+
+
+def _sorted_codes() -> list[str]:
+    _load_area_codes()
+    return _SORTED_CODES or []
 
 
 def only_digits(value: str | None) -> str:
@@ -49,11 +59,10 @@ def only_digits(value: str | None) -> str:
 
 
 def is_argentine(digits: str) -> bool:
-    """Heurística: 10 dígitos, o 11 (con 9), o 12 (con 54 9), o 13 (con 549)."""
+    """Heurística: 10 dígitos, o 11 (con 9), o 12 (con 54), o 13 (con 549)."""
     if not digits:
         return False
     if digits.startswith("54"):
-        # 54 + 9 + 10 = 13, o 54 + 10 = 12
         rest = digits[2:]
         if rest.startswith("9"):
             rest = rest[1:]
@@ -71,8 +80,31 @@ def significant_ar(digits: str) -> str:
     return d[-10:]
 
 
+def area_code_of(raw: str | None) -> str:
+    """Código de área del número argentino ('' si no es AR o no matchea)."""
+    local10 = significant_ar(raw or "")
+    if not local10:
+        return ""
+    for code in _sorted_codes():
+        if local10.startswith(code):
+            return code
+    return ""
+
+
+def province_of(raw: str | None) -> str:
+    """Provincia del número. 'Extranjero' si no es AR, 'Sin identificar' si
+    no hay número o el código de área no está en la tabla."""
+    d = only_digits(raw)
+    if not d:
+        return ZONE_UNKNOWN
+    if not is_argentine(d):
+        return ZONE_FOREIGN
+    code = area_code_of(d)
+    return _load_area_codes().get(code, "") or ZONE_UNKNOWN
+
+
 def format_ar(raw: str | None) -> str:
-    """Formatea a '+54 9 (XXX) XXXX-XXXX' si es argentino; devuelve original si no."""
+    """Formatea a '+54 9 <area> <local>' si es argentino; devuelve original si no."""
     if raw is None:
         return ""
     original = str(raw).strip()
@@ -81,24 +113,15 @@ def format_ar(raw: str | None) -> str:
         return ""
 
     if not is_argentine(digits):
-        # No argentino: preservar '+' si venía
         return f"+{digits}" if original.startswith("+") else original
 
-    local10 = digits[-10:]  # los últimos 10 son AREA(2-4) + LOCAL
-
-    codes = _load_area_codes()
-    area = ""
-    local = ""
-    for code in codes:
-        if 2 <= len(code) <= 4 and local10.startswith(code):
-            area = code
-            local = local10[len(code):]
-            break
-
-    if not area:
+    local10 = digits[-10:]
+    area = area_code_of(local10)
+    if area:
+        local = local10[len(area):]
+    else:
         # Fallback: asumir 3 dígitos de área
-        area = local10[:3]
-        local = local10[3:]
+        area, local = local10[:3], local10[3:]
 
     if len(local) == 8:
         local_fmt = f"{local[:4]}-{local[4:]}"
@@ -113,7 +136,7 @@ def format_ar(raw: str | None) -> str:
 
 
 def is_foreign(raw: str | None) -> bool:
-    """True si el número no es argentino (para clasificar automáticamente como SIN INTERES)."""
+    """True si el número no es argentino (para clasificar como SIN INTERES)."""
     d = only_digits(raw)
     if not d:
         return False

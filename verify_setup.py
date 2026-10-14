@@ -136,10 +136,11 @@ def main() -> int:
         _print(FAIL, "fetch_userfield_options", str(e))
         failed += 1
     try:
-        print("  → Descargando deals (puede tardar por rate limit)…")
-        deals = bitrix.fetch_all_deals()
-        _print(OK, f"Deals totales: {len(deals)}")
-        df = bitrix.deals_to_dataframe(deals)
+        ym = datetime.now().strftime("%Y-%m")
+        print(f"  → Descargando actividad de {ym} (puede tardar por rate limit)…")
+        deals = bitrix.fetch_activity_for_month(ym)
+        _print(OK, f"Deals con actividad en {ym}: {len(deals)}")
+        df = bitrix.deals_to_dataframe(deals, year_month=ym)
         _print(OK, f"Deals filtrados (TYPE_ID=SALE): {len(df)}")
         if len(df):
             from collections import Counter

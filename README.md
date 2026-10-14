@@ -28,32 +28,56 @@ Aplicación Streamlit para analizar los reportes del bot de WhatsApp
 ```
 app.py                      Punto de entrada Streamlit (3 tabs)
 utils/
-  sheets.py                 gspread I/O (fuente y destino, pestañas mensuales)
-  bitrix.py                 Cliente REST Bitrix24 + normalización de deals
-  phone_ar.py               Formateo AR '+54 9 (XXX) XXXX-XXXX'
-  cache.py                  Limpieza, unificación <2 días y reglas automáticas
-  machinery.py              Clasificación de maquinaria por nombre
-  branding.py               Colores/paletas Cotear
+  sheets.py                 gspread I/O (fuente, pestañas mensuales, índice de teléfonos)
+  bitrix.py                 Cliente REST Bitrix24 (batch, rate limit) + normalización de deals
+  phone_ar.py               Formato '+54 9 <area> <local>' y provincia por código de área
+  geo.py                    Conteo por provincia con agrupación en "Otros"
+  cache.py                  Limpieza, unificación mensual, reglas automáticas, áreas
+  machinery.py              Clasificación de maquinaria por nombre del negocio
+  pending.py                Cola de clasificaciones sin sincronizar
+  periods.py                Rangos de mes / trimestre / año
+  branding.py, styling.py   Colores Cotear y coloreo de tablas
 data/
-  codigos_area_argentina.json
-scripts/
-  create_destination_sheet.py
+  codigos_area_argentina.json   Código de área → provincia
+scripts/                    Diagnóstico de Bitrix y creación del libro destino
+tests/                      Pruebas de funciones puras (pytest)
 .streamlit/
   config.toml               Tema visual (azul #01498E)
   secrets.toml              (NO commitear)
 ```
 
+## Tabs
+
+- **Reporte mensual**: indicadores (provincia y área principal, % sin
+  interés real = sin respuestas + sin interés), torta por clasificación, barras área de interés ×
+  clasificación, torta por provincia y extracto descargable.
+- **Negocios Bitrix24**: período libre (mes, trimestre, año, rango), KPIs,
+  barras tipo de máquina × etapa (% o cantidad) con su tabla, motivos de baja,
+  torta por provincia y lista de negocios con etapa anterior.
+- **Clasificación Manual**: selección de un reporte y guardado en cola; el
+  botón *Sincronizar* del sidebar lo escribe en Sheets.
+
 ## Reglas automáticas de clasificación
 
-Se aplican al cargar los reportes:
+Se aplican al cargar los reportes del mes:
 
-- Reportes con menos de 2 días de diferencia entre sí se **unifican** sobre el
-  último (más completo).
+- Todos los reportes de un mismo número dentro del mismo mes calendario se
+  **unifican** sobre el último (los resúmenes previos quedan debajo).
 - Número extranjero → `SIN INTERES`.
+- Teléfono presente en algún negocio de venta de Bitrix → `DERIVADO A BITRIX`,
+  y el nombre se reemplaza por el de Bitrix. El cruce usa el índice
+  `_bitrix_telefonos` (todos los negocios, refresco semanal) más los negocios
+  del mes.
 - `Tipo de contacto = SI_RESUMEN_G2` → `DERIVADO A TÉCNICA`.
-- Teléfono con match en Bitrix → `DERIVADO A BITRIX`, y el nombre se
-  reemplaza por el que figura en Bitrix.
-- Resto → `SIN CLASIFICAR`.
+- Resto → `SIN CLASIFICAR` (placeholder: no se guarda en Sheets, así una
+  coincidencia posterior con Bitrix lo reclasifica sola).
 
-La clasificación manual (Tab 1) sobrescribe cualquier valor previo y persiste
-en la pestaña `YYYY-MM_Bot` del libro destino.
+La clasificación manual sobrescribe cualquier valor previo y persiste en la
+pestaña `YYYY-MM_Bot` del libro destino; sólo se escriben las filas que cambian.
+
+## Tests
+
+```
+pip install -r requirements-dev.txt
+pytest
+```

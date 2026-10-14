@@ -33,6 +33,7 @@ CATEGORIES = [
 # — colocar los más específicos arriba.
 _PATTERNS: list[tuple[str, str]] = [
     (r"\bl[aá]ser\s*dual\b|\bdual\s*l[aá]ser\b",              "Cortadora láser dual"),
+    (r"(?=.*\bl[aá]ser\b)(?=.*\btubos?\b)(?=.*\bchapas?\b)",  "Cortadora láser dual"),
     (r"\bl[aá]ser\b.*\btubo\b|\btubo\b.*\bl[aá]ser\b",         "Cortadora de tubo láser"),
     (r"\bl[aá]ser\b.*\bchapa\b|\bchapa\b.*\bl[aá]ser\b|\bl[aá]ser\b", "Cortadora de chapa láser"),
     (r"\bplasma\b",                                             "Cortadora CNC plasma"),
