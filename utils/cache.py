@@ -4,15 +4,42 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Iterable
 
+import re
+
 import pandas as pd
 
-from .phone_ar import format_ar, is_foreign, only_digits, significant_ar
+from .phone_ar import format_ar, is_foreign, only_digits, province_of, significant_ar
 
 
 DERIVADO_BITRIX = "DERIVADO A BITRIX"
 DERIVADO_TECNICA = "DERIVADO A TÉCNICA"
 SIN_INTERES = "SIN INTERES"
 SIN_CLASIFICAR = "SIN CLASIFICAR"
+
+# Agrupación del "Área de interés" del bot en las 4 áreas del reporte.
+AREA_MAQUINAS = "Máquinas"
+AREA_REPUESTOS = "Repuestos"
+AREA_TECNICA = "Servicio Técnico"
+AREA_NO_IDENTIFICADA = "No identificado"
+AREA_BUCKETS = [AREA_MAQUINAS, AREA_REPUESTOS, AREA_TECNICA, AREA_NO_IDENTIFICADA]
+
+_AREA_PATTERNS = [
+    (re.compile(r"repuest", re.I), AREA_REPUESTOS),
+    (re.compile(r"t[eé]cnic|servicio|asistencia|reparaci|mantenim", re.I), AREA_TECNICA),
+    (re.compile(r"m[aá]quin|maquinaria|venta|compra|cotiz", re.I), AREA_MAQUINAS),
+]
+
+
+def area_bucket(area: str | None) -> str:
+    """Lleva el texto libre de 'Área de interés' a Máquinas / Repuestos /
+    Servicio Técnico / No identificado (vacío o sin coincidencia)."""
+    text = str(area or "").strip()
+    if not text:
+        return AREA_NO_IDENTIFICADA
+    for rx, bucket in _AREA_PATTERNS:
+        if rx.search(text):
+            return bucket
+    return AREA_NO_IDENTIFICADA
 
 
 def _parse_dt(value: str) -> datetime | None:
@@ -40,13 +67,13 @@ def clean_source(raw: pd.DataFrame) -> pd.DataFrame:
 
     Salida (columnas):
         Fecha, Numero, Nombre, Area de interes, Resumen general,
-        Clasificacion interna, Tipo de contacto, _dt (datetime), _phone_sig
+        Clasificacion interna, Tipo de contacto, Zona, _dt (datetime), _phone_sig
     """
     if raw.empty:
         return pd.DataFrame(columns=[
             "Fecha", "Numero", "Nombre", "Area de interes",
             "Resumen general", "Clasificacion interna", "Tipo de contacto",
-            "_dt", "_phone_sig",
+            "Zona", "_dt", "_phone_sig",
         ])
 
     dt = raw["fecha_hora"].map(_parse_dt)
@@ -75,6 +102,7 @@ def clean_source(raw: pd.DataFrame) -> pd.DataFrame:
         "Resumen general": resumen_general,
         "Clasificacion interna": "",
         "Tipo de contacto": tipo,
+        "Zona": digits.map(province_of),
         "_dt": dt,
         "_phone_sig": phone_sig,
     })
@@ -191,7 +219,11 @@ def apply_auto_rules(df: pd.DataFrame, bitrix_phone_sig: set[str]) -> pd.DataFra
 
 
 def overwrite_names_from_bitrix(df: pd.DataFrame, bitrix_df: pd.DataFrame) -> pd.DataFrame:
-    """Reemplaza el Nombre por el que figura en Bitrix cuando el teléfono coincide."""
+    """Reemplaza el Nombre por el que figura en Bitrix cuando el teléfono coincide.
+
+    ``bitrix_df`` necesita las columnas ``_phone_sig`` y ``Cliente`` (sirve
+    tanto el df de deals del mes como el índice de teléfonos de todos los deals).
+    """
     if df.empty or bitrix_df.empty or "_phone_sig" not in bitrix_df.columns:
         return df
     lookup = (bitrix_df[bitrix_df["_phone_sig"] != ""]

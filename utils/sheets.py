@@ -19,6 +19,8 @@ from google.oauth2.service_account import Credentials
 
 T = TypeVar("T")
 
+SIN_CLASIFICAR = "SIN CLASIFICAR"
+
 # Snapshot local de lecturas caras a Sheets. Se usa como fallback cuando la
 # API falla, y opcionalmente como caché fresco con TTL corto.
 _CACHE_DIR = Path("data") / "cache"
@@ -58,7 +60,7 @@ BOT_HEADERS = [
 ]
 BITRIX_HEADERS = [
     "ID negocio", "Fecha creacion", "Fecha movimiento", "Nuevo",
-    "Nombre negocio", "Tipo maquinaria", "Etapa",
+    "Nombre negocio", "Tipo maquinaria", "Etapa", "Etapa anterior",
     "Cliente", "Compania", "Telefono", "Fuente", "Motivo de baja",
 ]
 
@@ -188,35 +190,29 @@ def _month_tab_name(year_month: str, kind: str) -> str:
     return f"{year_month}_{kind}"
 
 
-def _ensure_worksheet(sh: gspread.Spreadsheet, title: str, headers: list[str]) -> gspread.Worksheet:
+def _headers_for(kind: str) -> list[str]:
+    return BOT_HEADERS if kind == "Bot" else BITRIX_HEADERS
+
+
+def _ensure_worksheet(sh: gspread.Spreadsheet, title: str, headers: list[str],
+                      check_headers: bool = True) -> gspread.Worksheet:
     try:
         ws = sh.worksheet(title)
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=title, rows=200, cols=max(len(headers), 10))
-        ws.update(range_name="A1", values=[headers])
+        ws.update(range_name="A1", values=[headers], value_input_option="RAW")
         return ws
-    # Verificar cabecera
-    current = ws.row_values(1)
-    if current != headers:
-        ws.update(range_name="A1", values=[headers])
+    if check_headers and ws.row_values(1) != headers:
+        ws.update(range_name="A1", values=[headers], value_input_option="RAW")
     return ws
 
 
-@st.cache_data(ttl=120, show_spinner=False)
-def read_month_dataframe(year_month: str, kind: str) -> pd.DataFrame:
-    """Lee una pestaña mensual del libro destino. Cacheada 2 min para no
-    saturar el rate limit de Google Sheets (60 reads/min por usuario)."""
-    headers = BOT_HEADERS if kind == "Bot" else BITRIX_HEADERS
-    sh = _open_dest()
-    title = _month_tab_name(year_month, kind)
-    try:
-        ws = sh.worksheet(title)
-    except gspread.WorksheetNotFound:
-        return pd.DataFrame(columns=headers)
-    values = ws.get_all_values()
+def _values_to_df(values: list[list[str]], headers: list[str]) -> pd.DataFrame:
     if not values or len(values) == 1:
         return pd.DataFrame(columns=headers)
     hdr, *rows = values
+    width = len(hdr)
+    rows = [r + [""] * (width - len(r)) for r in rows]
     df = pd.DataFrame(rows, columns=hdr)
     for col in headers:
         if col not in df.columns:
@@ -224,163 +220,184 @@ def read_month_dataframe(year_month: str, kind: str) -> pd.DataFrame:
     return df[headers]
 
 
-def _invalidate_month_cache(year_month: str, kind: str) -> None:
-    """Invalida la caché de una pestaña mensual tras un write."""
+def _read_month_fresh(year_month: str, kind: str) -> tuple[Optional[gspread.Worksheet], pd.DataFrame]:
+    """Lectura SIN caché (para escribir sobre datos actuales). Devuelve (ws, df);
+    ws es None si la pestaña no existe."""
+    headers = _headers_for(kind)
+    sh = _open_dest()
     try:
-        read_month_dataframe.clear()  # limpia todo el caché de esta función
+        ws = sh.worksheet(_month_tab_name(year_month, kind))
+    except gspread.WorksheetNotFound:
+        return None, pd.DataFrame(columns=headers)
+    return ws, _values_to_df(ws.get_all_values(), headers)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def read_month_dataframe(year_month: str, kind: str) -> pd.DataFrame:
+    """Lee una pestaña mensual del libro destino. Cacheada 2 min para no
+    saturar el rate limit de Google Sheets (60 reads/min por usuario). Sólo
+    para MOSTRAR datos; antes de escribir se usa _read_month_fresh()."""
+    return _read_month_fresh(year_month, kind)[1]
+
+
+def _invalidate_month_cache() -> None:
+    try:
+        read_month_dataframe.clear()
     except Exception:
         pass
 
 
 def write_month_dataframe(year_month: str, kind: str, df: pd.DataFrame) -> None:
-    """Sobrescribe la pestaña mensual con el DataFrame dado."""
-    headers = BOT_HEADERS if kind == "Bot" else BITRIX_HEADERS
-    sh = _open_dest()
-    title = _month_tab_name(year_month, kind)
-    ws = _ensure_worksheet(sh, title, headers)
-
+    """Sobrescribe la pestaña mensual completa (snapshot de Bitrix o limpieza
+    de filas ignoradas)."""
+    headers = _headers_for(kind)
+    ws = _ensure_worksheet(_open_dest(), _month_tab_name(year_month, kind), headers,
+                           check_headers=False)
     out = df.copy()
     for col in headers:
         if col not in out.columns:
             out[col] = ""
     out = out[headers].fillna("").astype(str)
-
     ws.resize(rows=max(len(out) + 1, 2), cols=len(headers))
     # RAW: no interpreta el '+' de los números como inicio de fórmula
     ws.update(range_name="A1", values=[headers] + out.values.tolist(),
               value_input_option="RAW")
-    _invalidate_month_cache(year_month, kind)
+    _invalidate_month_cache()
 
 
-def upsert_bot_row(year_month: str, row: dict, key_col: str = "Numero") -> None:
-    """Inserta o reemplaza una fila en la pestaña mensual Bot por clave (Numero)."""
-    df = read_month_dataframe(year_month, "Bot")
-    mask = df[key_col].astype(str) == str(row.get(key_col, ""))
-    if mask.any():
-        idx = df.index[mask][0]
-        for k, v in row.items():
-            df.at[idx, k] = v
-    else:
-        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-    write_month_dataframe(year_month, "Bot", df)
+def _col_letter(n: int) -> str:
+    s = ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def _apply_row_changes(year_month: str, ws: Optional[gspread.Worksheet],
+                       updates: dict[int, list[str]], appends: list[list[str]]) -> None:
+    """Escribe sólo las filas que cambiaron (1 batch_update) y agrega las nuevas
+    (1 append). `updates` = {indice_0_en_datos: fila}."""
+    if not updates and not appends:
+        return
+    headers = BOT_HEADERS
+    if ws is None:
+        ws = _ensure_worksheet(_open_dest(), _month_tab_name(year_month, "Bot"), headers,
+                               check_headers=False)
+    last = _col_letter(len(headers))
+    if updates:
+        data = [
+            {"range": f"A{i + 2}:{last}{i + 2}", "values": [row]}
+            for i, row in sorted(updates.items())
+        ]
+        _with_retry(lambda: ws.batch_update(data, value_input_option="RAW"))
+    if appends:
+        _with_retry(lambda: ws.append_rows(appends, value_input_option="RAW",
+                                           table_range="A1"))
+    _invalidate_month_cache()
+
+
+def _persistable(classification: str) -> str:
+    """SIN CLASIFICAR es un placeholder: no se guarda, así las reglas
+    automáticas pueden reclasificar el contacto en corridas futuras."""
+    c = str(classification or "").strip()
+    return "" if c == SIN_CLASIFICAR else c
 
 
 def batch_upsert_bot_rows(year_month: str, rows: list[dict],
                           key_col: str = "Numero") -> None:
-    """Aplica una lista de upserts sobre la pestaña Bot del mes en 2 API calls:
-    un read + un write. Ideal para hacer flush de la cola de cambios pendientes.
-
-    Cada dict debe traer al menos {key_col}; los demás campos se mergean.
-    """
+    """Aplica una lista de upserts sobre la pestaña Bot del mes: lectura fresca
+    + escritura sólo de las filas afectadas. Usado por el flush de la cola."""
     if not rows:
         return
-    df = read_month_dataframe(year_month, "Bot")
-    df = df.copy()
-    if df.empty:
-        df = pd.DataFrame(columns=BOT_HEADERS)
-
-    idx_by_key = {str(v): i for i, v in enumerate(df[key_col].astype(str).tolist())}
-    new_rows = []
+    ws, df = _with_retry(lambda: _read_month_fresh(year_month, "Bot"))
+    idx_by_key = {str(v).strip(): i for i, v in enumerate(df[key_col].astype(str))}
+    updates: dict[int, list[str]] = {}
+    appends: list[list[str]] = []
     for r in rows:
         key = str(r.get(key_col, "")).strip()
         if not key:
             continue
+        r = {**r, "Clasificacion interna": _persistable(r.get("Clasificacion interna", ""))}
         if key in idx_by_key:
             i = idx_by_key[key]
-            for k, v in r.items():
-                if k in df.columns:
-                    df.at[i, k] = v
+            current = df.iloc[i].astype(str).to_dict()
+            merged = {**current, **{k: str(v) for k, v in r.items() if k in BOT_HEADERS}}
+            updates[i] = [merged[h] for h in BOT_HEADERS]
         else:
-            new_rows.append(r)
-    if new_rows:
-        df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
-
-    _with_retry(lambda: write_month_dataframe(year_month, "Bot", df))
-
-
-def update_bot_classification(year_month: str, numero: str, classification: str) -> None:
-    """Actualiza sólo la clasificación interna de un contacto por Numero."""
-    df = read_month_dataframe(year_month, "Bot")
-    mask = df["Numero"].astype(str) == str(numero)
-    if not mask.any():
-        return
-    df.loc[mask, "Clasificacion interna"] = classification
-    write_month_dataframe(year_month, "Bot", df)
+            appends.append([str(r.get(h, "")) for h in BOT_HEADERS])
+    _apply_row_changes(year_month, ws, updates, appends)
 
 
 def load_persisted_classifications(year_month: str) -> dict[str, str]:
-    """Devuelve {Numero: Clasificacion interna} de la pestaña mensual."""
+    """Devuelve {Numero: Clasificacion interna} de la pestaña mensual,
+    ignorando vacíos y el placeholder SIN CLASIFICAR (filas viejas)."""
     df = read_month_dataframe(year_month, "Bot")
     if df.empty:
         return {}
-    return {
-        str(r["Numero"]): str(r["Clasificacion interna"])
-        for _, r in df.iterrows()
-        if str(r.get("Numero", "")).strip()
-    }
+    out = {}
+    for _, r in df.iterrows():
+        num = str(r.get("Numero", "")).strip()
+        cls = _persistable(r.get("Clasificacion interna", ""))
+        if num and cls:
+            out[num] = cls
+    return out
 
 
 def sync_month_bot(year_month: str, df: pd.DataFrame,
                    ignored_keys: set[str] | None = None) -> None:
-    """Persiste el snapshot completo del mes (incluye clasificaciones automáticas).
+    """Persiste el mes (clasificaciones automáticas incluidas) con un merge
+    contra la hoja leída en fresco:
 
-    Merge con lo ya guardado por Numero: las clasificaciones existentes en la
-    hoja no se pisan si vienen distintas del snapshot (la hoja es fuente de
-    verdad para clasificaciones ya hechas). Sólo se agregan filas nuevas o se
-    actualiza el nombre si ahora está poblado.
-
-    Si se pasa ``ignored_keys``, cualquier fila persistida cuyo número matchee
-    la lista negra se OMITE del output — así, cuando un número se agrega a
-    `_ignorados`, se limpia también del histórico de las pestañas mensuales en
-    el próximo sync.
+    - Una clasificación ya guardada gana sobre la calculada (es la manual o
+      una automática previa). SIN CLASIFICAR no cuenta como guardada.
+    - El nombre nuevo gana si no está vacío.
+    - Las filas que ya no aparecen se conservan, salvo que su número esté en
+      `_ignorados`: en ese caso se reescribe la pestaña sin ellas.
+    - Si no hay que borrar nada, sólo se escriben las filas que cambiaron.
     """
     ignored_keys = ignored_keys or set()
-    persisted = read_month_dataframe(year_month, "Bot")
-    persisted_map = {
-        str(r["Numero"]): dict(r) for _, r in persisted.iterrows()
-        if str(r.get("Numero", "")).strip()
+    ws, persisted = _with_retry(lambda: _read_month_fresh(year_month, "Bot"))
+    persisted = persisted.astype(str)
+    idx_by_num = {
+        str(n).strip(): i for i, n in enumerate(persisted["Numero"]) if str(n).strip()
     }
 
-    def _is_ignored(numero: str) -> bool:
-        if not ignored_keys:
-            return False
-        return _ignore_key(numero) in ignored_keys
-
-    rows_out = []
-    seen_numeros: set[str] = set()
+    updates: dict[int, list[str]] = {}
+    appends: list[list[str]] = []
     for _, r in df.iterrows():
         num = str(r.get("Numero", "")).strip()
         if not num:
             continue
-        seen_numeros.add(num)
-        existing = persisted_map.get(num, {})
-        classification = str(existing.get("Clasificacion interna", "")).strip() \
-            or str(r.get("Clasificacion interna", "")).strip()
-        nombre = str(r.get("Nombre", "")).strip() \
-            or str(existing.get("Nombre", "")).strip()
-        rows_out.append({
-            "Fecha": str(r.get("Fecha", "")),
-            "Numero": num,
-            "Nombre": nombre,
-            "Clasificacion interna": classification,
-        })
+        new_cls = _persistable(r.get("Clasificacion interna", ""))
+        if num in idx_by_num:
+            i = idx_by_num[num]
+            old = persisted.iloc[i].to_dict()
+            row = {
+                "Fecha": str(r.get("Fecha", "")) or old.get("Fecha", ""),
+                "Numero": num,
+                "Nombre": str(r.get("Nombre", "")).strip() or old.get("Nombre", ""),
+                "Clasificacion interna": _persistable(old.get("Clasificacion interna", "")) or new_cls,
+            }
+            values = [row[h] for h in BOT_HEADERS]
+            if values != [old.get(h, "") for h in BOT_HEADERS]:
+                updates[i] = values
+        else:
+            appends.append([str(r.get("Fecha", "")), num,
+                            str(r.get("Nombre", "")).strip(), new_cls])
 
-    # Conservar filas persistidas que ya no aparecen en el snapshot (histórico),
-    # salvo que ahora estén en la lista negra.
-    for num, existing in persisted_map.items():
-        if num in seen_numeros:
-            continue
-        if _is_ignored(num):
-            continue  # limpieza retroactiva: se cae de la hoja del mes
-        rows_out.append({
-            "Fecha": str(existing.get("Fecha", "")),
-            "Numero": num,
-            "Nombre": str(existing.get("Nombre", "")),
-            "Clasificacion interna": str(existing.get("Clasificacion interna", "")),
-        })
-
-    out_df = pd.DataFrame(rows_out, columns=BOT_HEADERS)
-    write_month_dataframe(year_month, "Bot", out_df)
+    to_drop = [i for n, i in idx_by_num.items()
+               if ignored_keys and _ignore_key(n) in ignored_keys]
+    if to_drop:
+        full = persisted.copy()
+        for i, values in updates.items():
+            full.iloc[i] = values
+        full = full.drop(index=to_drop)
+        if appends:
+            full = pd.concat([full, pd.DataFrame(appends, columns=BOT_HEADERS)],
+                             ignore_index=True)
+        _with_retry(lambda: write_month_dataframe(year_month, "Bot", full))
+    else:
+        _apply_row_changes(year_month, ws, updates, appends)
 
 
 _IGNORED_TAB = "_ignorados"
@@ -489,12 +506,37 @@ def set_last_bitrix_sync(year_month: str, ts: Optional[datetime] = None) -> None
         pass
 
 
-def list_month_tabs() -> list[str]:
-    """Devuelve los meses (YYYY-MM) que tienen alguna pestaña en el destino."""
+# ---------------------------------------------------------------------------
+# Índice de teléfonos de todos los deals de venta (pestaña _bitrix_telefonos)
+# ---------------------------------------------------------------------------
+_PHONE_INDEX_TAB = "_bitrix_telefonos"
+PHONE_INDEX_HEADERS = ["_phone_sig", "Cliente", "Telefono"]
+_PHONE_INDEX_META = "bitrix_phone_index"
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def read_phone_index() -> tuple[pd.DataFrame, Optional[datetime]]:
+    """(df, fecha del último refresco) del índice guardado en el libro destino."""
     sh = _open_dest()
-    months: set[str] = set()
-    for ws in sh.worksheets():
-        title = ws.title
-        if len(title) >= 10 and title[4] == "-" and title[7] == "_":
-            months.add(title[:7])
-    return sorted(months, reverse=True)
+    try:
+        ws = sh.worksheet(_PHONE_INDEX_TAB)
+    except gspread.WorksheetNotFound:
+        return pd.DataFrame(columns=PHONE_INDEX_HEADERS), None
+    df = _values_to_df(ws.get_all_values(), PHONE_INDEX_HEADERS)
+    raw = _get_meta(_PHONE_INDEX_META)
+    try:
+        ts = datetime.fromisoformat(raw) if raw else None
+    except ValueError:
+        ts = None
+    return df, ts
+
+
+def write_phone_index(df: pd.DataFrame) -> None:
+    sh = _open_dest()
+    ws = _ensure_worksheet(sh, _PHONE_INDEX_TAB, PHONE_INDEX_HEADERS, check_headers=False)
+    out = df.reindex(columns=PHONE_INDEX_HEADERS).fillna("").astype(str)
+    ws.resize(rows=max(len(out) + 1, 2), cols=len(PHONE_INDEX_HEADERS))
+    ws.update(range_name="A1", values=[PHONE_INDEX_HEADERS] + out.values.tolist(),
+              value_input_option="RAW")
+    _set_meta(_PHONE_INDEX_META, datetime.now().isoformat(timespec="seconds"))
+    read_phone_index.clear()
