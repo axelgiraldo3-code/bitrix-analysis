@@ -1,9 +1,18 @@
-"""Clasificación de tipo de maquinaria a partir del nombre del negocio."""
+"""Clasificación de tipo de maquinaria a partir del nombre del negocio.
+
+El nombre se normaliza (minúsculas, sin tildes, "C.N.C." → "cnc") y se
+compara contra patrones ordenados de más específico a más general: el primero
+que coincide gana. Para sumar un sinónimo, agregarlo en el patrón de su
+categoría, siempre sin tildes.
+"""
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Optional
 
+
+OTHER = "Otro / Sin clasificar"
 
 # Categorías canónicas comercializadas por Cotear
 CATEGORIES = [
@@ -25,43 +34,71 @@ CATEGORIES = [
     "Centro de perforado",
     "Plegadora",
     "Cortadora guillotina",
-    "Otro / Sin clasificar",
+    OTHER,
 ]
 
+_LASER = r"(laser|fibra optica|laser de fibra|fiber)"
+_TUBO = r"(tubos?|canos?|perfiles?)"
+_CHAPA = r"(chapas?|planchas?|laminas?)"
 
-# Patrones (regex, case-insensitive). El primero que matchea gana; orden importa
-# — colocar los más específicos arriba.
+# (patrón sobre texto normalizado, categoría). Orden = prioridad.
 _PATTERNS: list[tuple[str, str]] = [
-    (r"\bl[aá]ser\s*dual\b|\bdual\s*l[aá]ser\b",              "Cortadora láser dual"),
-    (r"(?=.*\bl[aá]ser\b)(?=.*\btubos?\b)(?=.*\bchapas?\b)",  "Cortadora láser dual"),
-    (r"\bl[aá]ser\b.*\btubo\b|\btubo\b.*\bl[aá]ser\b",         "Cortadora de tubo láser"),
-    (r"\bl[aá]ser\b.*\bchapa\b|\bchapa\b.*\bl[aá]ser\b|\bl[aá]ser\b", "Cortadora de chapa láser"),
-    (r"\bplasma\b",                                             "Cortadora CNC plasma"),
-    (r"\bguillotina\b",                                         "Cortadora guillotina"),
-    (r"\bplegadora\b|\bpress\s*brake\b",                        "Plegadora"),
-    (r"\balesadora\b|\balesado\b",                              "Alesadora"),
-    (r"\bperforad(o|ora)\b|\bcentro\s+de\s+perforad",            "Centro de perforado"),
-    (r"\bsoldadur",                                              "Sistema de soldadura automática"),
-    (r"\bca[nñ]os?\b.*\bdisco\b|\bdisco\b.*\bca[nñ]os?\b",        "Cortadora de caños a disco"),
-    (r"\bmortajadora\b|\bmortajado\b",                           "Mortajadora"),
-    (r"\bcurvadora\b|\bcurvado\s+de\s+tubo",                     "Curvadora de tubos"),
-    (r"\brectificadora\b",                                       "Rectificadora CNC"),
-    (r"\bcentro\s+de\s+mecanizad",                               "Centro de mecanizado"),
-    (r"\bfresadora\b.*\bcnc\b|\bcnc\b.*\bfresadora\b",           "Fresadora CNC"),
-    (r"\bfresadora\b",                                           "Fresadora convencional"),
-    (r"\btorno\b.*\bcnc\b|\bcnc\b.*\btorno\b",                   "Torno CNC"),
-    (r"\btorno\b",                                               "Torno convencional"),
+    # --- Láser: dual antes que tubo, tubo antes que chapa -------------------
+    (rf"\b{_LASER}\b.*\bdual\b|\bdual\b.*\b{_LASER}\b", "Cortadora láser dual"),
+    (rf"(?=.*\b{_LASER}\b)(?=.*\b{_TUBO}\b)(?=.*\b{_CHAPA}\b)", "Cortadora láser dual"),
+    (rf"\b{_LASER}\b.*\b{_TUBO}\b|\b{_TUBO}\b.*\b{_LASER}\b", "Cortadora de tubo láser"),
+    (rf"\b{_LASER}\b", "Cortadora de chapa láser"),
+    # --- Otros cortes -------------------------------------------------------
+    (r"\bplasma\b|\boxicorte\b|\bpantografo\b", "Cortadora CNC plasma"),
+    (r"\bguillotina\b|\bcizalla\b|\bcizalladora\b", "Cortadora guillotina"),
+    (r"\b(sierra|cortadora|tronzadora)\b.*\b(disco|circular|sensitiva)\b"
+     r"|\b(disco|circular)\b.*\bcanos?\b|\btronzadora\b|\bsierra circular\b"
+     r"|\bcortadora de canos?\b", "Cortadora de caños a disco"),
+    # --- Conformado ---------------------------------------------------------
+    (r"\bplegadora\b|\bplegado\b|\bpress ?brake\b|\bdobladora de chapas?\b"
+     r"|\bplegadora hidraulica\b", "Plegadora"),
+    (r"\bcurvadora\b|\bcurvado\b|\bdobladora( de)? (canos?|tubos?)\b"
+     r"|\bdobladora\b|\bcurvatubos?\b", "Curvadora de tubos"),
+    # --- Soldadura ----------------------------------------------------------
+    (r"\bsoldad|\bsoldar\b|\brobot(ica)? de soldadura\b|\bsoldadora\b",
+     "Sistema de soldadura automática"),
+    # --- Arranque de viruta -------------------------------------------------
+    (r"\balesadora\b|\balesado\b|\bmandrinadora\b|\bmandrinado\b", "Alesadora"),
+    (r"\bmortajadora\b|\bmortajado\b|\bmortaja\b", "Mortajadora"),
+    (r"\brectificadora\b|\brectificado\b|\bamoladora plana\b", "Rectificadora CNC"),
+    (r"\bperforad(o|ora|ora radial)\b|\bcentro de perforad|\btaladro\b"
+     r"|\bagujereadora\b|\btaladro radial\b", "Centro de perforado"),
+    # Torneado antes que mecanizado: "centro de torneado" es un torno CNC
+    (r"\bcentro (de )?torneado\b|\btorneado\b.*\bcnc\b|\btorno\b.*\bcnc\b"
+     r"|\bcnc\b.*\btorno\b|\btorno (automatico|suizo|swiss)\b|\bswiss type\b"
+     r"|\btorno vertical\b", "Torno CNC"),
+    (r"\bcentro (de )?mecanizad|\bmecanizado (vertical|horizontal)\b"
+     r"|\b(vmc|hmc)\b|\bcentro (vertical|horizontal)\b|\b5 ejes\b"
+     r"|\bcinco ejes\b", "Centro de mecanizado"),
+    (r"\b(fresadora|fresa)\b.*\bcnc\b|\bcnc\b.*\b(fresadora|fresa)\b|\brouter\b",
+     "Fresadora CNC"),
+    (r"\bfresadora\b|\bfresa universal\b|\bfresadora universal\b",
+     "Fresadora convencional"),
+    (r"\btorno\b|\btorneado\b", "Torno convencional"),
 ]
 
+_COMPILED = [(re.compile(p), cat) for p, cat in _PATTERNS]
 
-_COMPILED = [(re.compile(p, re.IGNORECASE), cat) for p, cat in _PATTERNS]
+
+def normalize(text: str) -> str:
+    """Minúsculas, sin tildes, 'ñ' → 'n', 'C.N.C.' → 'cnc', espacios simples."""
+    t = unicodedata.normalize("NFKD", str(text).lower())
+    t = "".join(ch for ch in t if not unicodedata.combining(ch))
+    t = re.sub(r"\bc\s*\.?\s*n\s*\.?\s*c\b\.?", "cnc", t)
+    t = re.sub(r"[^a-z0-9]+", " ", t)
+    return " ".join(t.split())
 
 
 def classify_machinery(deal_name: Optional[str]) -> str:
     if not deal_name:
-        return "Otro / Sin clasificar"
-    text = str(deal_name)
+        return OTHER
+    text = normalize(deal_name)
     for rx, cat in _COMPILED:
         if rx.search(text):
             return cat
-    return "Otro / Sin clasificar"
+    return OTHER

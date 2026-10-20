@@ -254,3 +254,19 @@ def available_year_months(df: pd.DataFrame) -> list[str]:
         return []
     ym = df["_dt"].dropna().map(lambda d: f"{d.year:04d}-{d.month:02d}")
     return sorted(set(ym.tolist()), reverse=True)
+
+
+def attach_deal_names(df: pd.DataFrame, lookup: pd.DataFrame) -> pd.DataFrame:
+    """Agrega la columna 'Negocio' (nombre del/los negocio(s) de Bitrix del
+    contacto) cruzando por teléfono. Vacía si el contacto no tiene negocio."""
+    out = df.copy()
+    if out.empty:
+        out["Negocio"] = pd.Series(dtype=str)
+        return out
+    if lookup.empty or "Negocio" not in lookup.columns:
+        out["Negocio"] = ""
+        return out
+    m = (lookup[lookup["_phone_sig"].astype(str) != ""]
+         .drop_duplicates("_phone_sig").set_index("_phone_sig")["Negocio"])
+    out["Negocio"] = out["_phone_sig"].astype(str).map(m).fillna("")
+    return out

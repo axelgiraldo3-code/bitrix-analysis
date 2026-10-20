@@ -39,6 +39,7 @@ utils/
   branding.py, styling.py   Colores Cotear y coloreo de tablas
 data/
   codigos_area_argentina.json   Código de área → provincia
+  provincias_argentina.geojson  Contornos de provincias para el mapa (CABA dentro de Buenos Aires)
 scripts/                    Diagnóstico de Bitrix y creación del libro destino
 tests/                      Pruebas de funciones puras (pytest)
 .streamlit/
@@ -50,10 +51,11 @@ tests/                      Pruebas de funciones puras (pytest)
 
 - **Reporte mensual**: indicadores (provincia y área principal, % sin
   interés real = sin respuestas + sin interés), torta por clasificación, barras área de interés ×
-  clasificación, torta por provincia y extracto descargable.
+  clasificación, mapa por provincia y tabla de consultas con su negocio de Bitrix.
 - **Negocios Bitrix24**: período libre (mes, trimestre, año, rango), KPIs,
   barras tipo de máquina × etapa (% o cantidad) con su tabla, motivos de baja,
-  torta por provincia y lista de negocios con etapa anterior.
+  mapa por provincia y lista de negocios con etapa anterior (columnas
+  Nuevo y Tipo maquinaria opcionales).
 - **Clasificación Manual**: selección de un reporte y guardado en cola; el
   botón *Sincronizar* del sidebar lo escribe en Sheets.
 

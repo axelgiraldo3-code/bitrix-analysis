@@ -481,24 +481,33 @@ def deals_to_dataframe(deals: list[dict], year_month: Optional[str] = None) -> p
 # ---------------------------------------------------------------------------
 # Índice de teléfonos de TODOS los deals de venta (para el cruce con el bot)
 # ---------------------------------------------------------------------------
-PHONE_INDEX_COLUMNS = ["_phone_sig", "Cliente", "Telefono"]
+PHONE_INDEX_COLUMNS = ["_phone_sig", "Cliente", "Telefono", "Negocio"]
 
 
 def fetch_phone_index() -> pd.DataFrame:
-    """Teléfonos y nombres de los contactos de todos los deals del pipeline
-    Venta de máquinas, sin importar cuándo se crearon o movieron."""
+    """Teléfono, nombre y negocio(s) de los contactos de todos los deals del
+    pipeline Venta de máquinas, sin importar cuándo se crearon o movieron.
+    Si un contacto tiene varios negocios, se listan del más nuevo al más viejo
+    separados por " | "."""
     deals = _paginate_deals(
         {"CATEGORY_ID": SALES_CATEGORY_ID, "TYPE_ID": "SALE"},
-        select=["ID", "CONTACT_ID"],
-    )
-    contact_ids = [str(d.get("CONTACT_ID") or "") for d in deals]
-    contacts = fetch_contacts(contact_ids)
+        select=["ID", "CONTACT_ID", "TITLE", "DATE_CREATE"],
+    )  # ya vienen ordenados por DATE_CREATE descendente
+    titles_by_contact: dict[str, list[str]] = {}
+    for d in deals:
+        cid = str(d.get("CONTACT_ID") or "")
+        title = str(d.get("TITLE") or "").strip()
+        if cid and cid != "0" and title and title not in titles_by_contact.get(cid, []):
+            titles_by_contact.setdefault(cid, []).append(title)
+    contacts = fetch_contacts(list(titles_by_contact) or
+                              [str(d.get("CONTACT_ID") or "") for d in deals])
     rows = []
-    for c in contacts.values():
+    for cid, c in contacts.items():
         tel = format_ar(c.get("phone", ""))
         sig = significant_ar(tel)
         if sig:
-            rows.append({"_phone_sig": sig, "Cliente": c.get("name", ""), "Telefono": tel})
+            rows.append({"_phone_sig": sig, "Cliente": c.get("name", ""), "Telefono": tel,
+                         "Negocio": " | ".join(titles_by_contact.get(cid, []))})
     if not rows:
         return pd.DataFrame(columns=PHONE_INDEX_COLUMNS)
     return pd.DataFrame(rows).drop_duplicates("_phone_sig")[PHONE_INDEX_COLUMNS]

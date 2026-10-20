@@ -125,3 +125,55 @@ def test_zone_counts_keeps_single_small_zone():
 def test_top_province_ignores_foreign_and_unknown():
     zones = pd.Series(["Extranjero"] * 5 + ["Sin identificar"] * 4 + ["Córdoba"] * 2)
     assert geo.top_province(zones) == ("Córdoba", 2)
+
+
+# --- mejoras oct-19 ------------------------------------------------------------
+@pytest.mark.parametrize("title, cat", [
+    ("Centro de torneado DMTG", "Torno CNC"),
+    ("Torno C.N.C. 500", "Torno CNC"),
+    ("VMC 850", "Centro de mecanizado"),
+    ("Fresa CNC", "Fresadora CNC"),
+    ("Cizalla hidráulica", "Cortadora guillotina"),
+    ("Dobladora de caños", "Curvadora de tubos"),
+    ("Tronzadora de caños", "Cortadora de caños a disco"),
+    ("Taladro radial", "Centro de perforado"),
+    ("Mandrinadora", "Alesadora"),
+    ("Cortadora laser de caños", "Cortadora de tubo láser"),
+])
+def test_classify_machinery_synonyms(title, cat):
+    assert classify_machinery(title) == cat
+
+
+def test_short_labels_trim_and_keep_unique():
+    from utils.styling import short_labels
+    out = short_labels([
+        "Sin respuesta inicial (el interesado no responde ante el primer intento de contacto)",
+        "Proyecto suspendido.",
+        "Extraccion de informacion para comparar con competencia",
+        "Extraccion de informacion para comprar China directo",
+    ])
+    assert out[0] == "Sin respuesta inicia…"
+    assert out[1] == "Proyecto suspendido"
+    assert all(len(x) <= 25 for x in out)  # 20 + "…" + sufijo " (2)"
+    assert len(set(out)) == len(out)
+
+
+def test_attach_deal_names():
+    df = pd.DataFrame({"_phone_sig": ["3516868753", "1155891098", ""]})
+    lookup = pd.DataFrame({"_phone_sig": ["3516868753"], "Negocio": ["Torno CNC Travis"]})
+    assert cache.attach_deal_names(df, lookup)["Negocio"].tolist() == ["Torno CNC Travis", "", ""]
+
+
+def test_province_map_only_active_provinces():
+    zones = pd.Series(["Córdoba"] * 3 + ["Buenos Aires"] * 5 + ["Extranjero"] * 2)
+    counts = geo.zone_counts(zones, threshold=0)
+    fig = geo.province_map(counts, len(zones))
+    choro, labels = fig.data
+    assert sorted(choro.locations) == ["Buenos Aires", "Córdoba"]
+    assert sorted(labels.text) == ["30.0%", "50.0%"]
+    assert "Extranjero: 2" in geo.outside_map_note(counts, len(zones))
+
+
+def test_geojson_has_all_provinces():
+    names = {f["id"] for f in geo.load_provinces()["features"]}
+    assert len(names) == 23 and {"Buenos Aires", "Tierra del Fuego", "Córdoba"} <= names
