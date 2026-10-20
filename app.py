@@ -28,7 +28,7 @@ from utils.styling import short_labels, style_bitrix_table, style_bot_table
 
 
 st.set_page_config(
-    page_title="COTEAR — Análisis de consultas",
+    page_title="COTEAR — Informe de Actividad Comercial",
     page_icon="📊",
     layout="wide",
 )
@@ -128,7 +128,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("COTEAR — Panel de consultas y negociaciones")
+st.title("COTEAR — Informe de Actividad Comercial")
+st.caption("Consultas recibidas por el bot de WhatsApp y negocios de venta de máquinas en Bitrix24.")
 
 
 # --- Recuperación de cola pendiente desde disco (una vez por sesión) ---------
@@ -563,7 +564,7 @@ with tab_reportes:
             st.download_button(
                 "⬇️ Descargar extracto mensual (CSV)",
                 data=_csv(month_df[display_cols + ["Area"]]),
-                file_name=f"extracto_{selected_month}.csv",
+                file_name=f"actividad_comercial_consultas_{selected_month}.csv",
                 mime="text/csv",
             )
 
@@ -572,7 +573,7 @@ with tab_reportes:
 # TAB — Negocios Bitrix24
 # =============================================================================
 with tab_negocios:
-    st.subheader("Actividad del período")
+    st.subheader("Negocios del período")
 
     period_type = st.radio(
         "Período",
@@ -633,9 +634,7 @@ with tab_negocios:
         _n_snap = sum(1 for s in period_sources.values() if s == "snapshot")
         st.caption(
             f"Período: {range_start.strftime('%d-%m-%y')} a {range_end.strftime('%d-%m-%y')} "
-            f"({len(period_months)} mes(es) — {_n_snap} desde snapshot, {_n_api} desde API). "
-            "Incluye negocios **creados** o **movidos** de etapa dentro del período "
-            "(los creados en el período se marcan 'Sí' en la columna Nuevo)."
+            f"({len(period_months)} mes(es) — {_n_snap} desde snapshot, {_n_api} desde API)."
         )
 
         b = period_df.copy()
@@ -644,16 +643,15 @@ with tab_negocios:
             b["_cre_dt"] = pd.to_datetime(b["Fecha creacion"], format="%d-%m-%y", errors="coerce")
             _start_ts, _end_ts = pd.Timestamp(range_start), pd.Timestamp(range_end)
             in_created = (b["_cre_dt"] >= _start_ts) & (b["_cre_dt"] <= _end_ts)
-            in_moved = (b["_mov_dt"] >= _start_ts) & (b["_mov_dt"] <= _end_ts)
-            b = b[in_created | in_moved].copy()
-            b["Nuevo"] = ((b["_cre_dt"] >= _start_ts) & (b["_cre_dt"] <= _end_ts)).map({True: "Sí", False: ""})
+            # Sólo negocios propios del período (creados dentro del rango).
+            b = b[in_created].copy()
             b = b.sort_values("_mov_dt", ascending=False)
             b["Zona"] = b["Telefono"].map(province_of)
             if "Etapa anterior" not in b.columns:
                 b["Etapa anterior"] = ""
 
         if b.empty:
-            st.info("No hay actividad de Bitrix para este período.")
+            st.info("No hay negocios de Bitrix creados en este período.")
         else:
             etapas_norm = b["Etapa"].astype(str).str.strip().str.lower()
             mask_ganado = etapas_norm.str.startswith("cerrado ganado")
@@ -681,8 +679,9 @@ with tab_negocios:
 
             with section("kpis_negocios"):
                 r1 = st.columns(4)
-                r1[0].metric("Total con actividad", len(b))
-                r1[1].metric("Nuevos del período", int((b["Nuevo"] == "Sí").sum()))
+                r1[0].metric("Negocios del período", len(b))
+                r1[1].metric("En curso", int((~mask_cerrado).sum()),
+                             help="Negocios del período que todavía no están cerrados")
                 r1[2].metric("Fuente destacada", fuente_top,
                              delta=_n(fuente_n, "negocios") if fuente_n else None, delta_color="off")
                 r1[3].metric("Provincia con más negocios", zona_top_b,
@@ -776,25 +775,25 @@ with tab_negocios:
             # --- Lista --------------------------------------------------------
             with section("lista_negocios"):
                 listing_cols = [
-                    "Nuevo", "Fecha movimiento", "Fecha creacion", "Nombre negocio",
+                    "Fecha movimiento", "Fecha creacion", "Nombre negocio",
                     "Tipo maquinaria", "Cliente", "Compania", "Etapa", "Etapa anterior",
                     "Fuente", "Motivo de baja", "Telefono", "Zona",
                 ]
-                optional_cols = ["Nuevo", "Tipo maquinaria"]
+                optional_cols = ["Tipo maquinaria"]
                 listing = b[[c for c in listing_cols if c in b.columns]]
-                st.markdown(f"### Lista de negociaciones con actividad en el período ({len(listing)})")
+                st.markdown(f"### Lista de negocios del período ({len(listing)})")
                 # Ocultas de entrada; se muestran desde el menú de columnas (ícono
                 # del ojo) de la tabla, sin recargar la app.
                 st.dataframe(
                     style_bitrix_table(listing), hide_index=True, width="stretch",
                     column_config={c: {"hidden": True} for c in optional_cols},
                 )
-                st.caption("Las columnas Nuevo y Tipo maquinaria están ocultas: "
-                           "activalas desde el ícono 👁 de la tabla.")
+                st.caption("La columna Tipo maquinaria está oculta: "
+                           "activala desde el ícono 👁 de la tabla.")
                 st.download_button(
-                    "⬇️ Descargar actividad del período (CSV)",
+                    "⬇️ Descargar negocios del período (CSV)",
                     data=_csv(listing),
-                    file_name=f"bitrix_actividad_{period_label}.csv",
+                    file_name=f"actividad_comercial_negocios_{period_label}.csv",
                     mime="text/csv",
                 )
 

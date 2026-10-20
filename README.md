@@ -1,4 +1,4 @@
-# COTEAR — App de análisis de consultas y negociaciones
+# COTEAR — Informe de Actividad Comercial
 
 Aplicación Streamlit para analizar los reportes del bot de WhatsApp
 (Neurolinks) y las negociaciones de Bitrix24 de Cotear SRL.
@@ -52,10 +52,12 @@ tests/                      Pruebas de funciones puras (pytest)
 - **Reporte mensual**: indicadores (provincia y área principal, % sin
   interés real = sin respuestas + sin interés), torta por clasificación, barras área de interés ×
   clasificación, mapa por provincia y tabla de consultas con su negocio de Bitrix.
-- **Negocios Bitrix24**: período libre (mes, trimestre, año, rango), KPIs,
+- **Negocios Bitrix24**: período libre (mes, trimestre, año, rango). Sólo
+  cuenta los negocios **creados** dentro del período (con su etapa actual); los
+  movimientos de negocios de períodos anteriores no se incluyen. KPIs,
   barras tipo de máquina × etapa (% o cantidad) con su tabla, motivos de baja,
-  mapa por provincia y lista de negocios con etapa anterior (columnas
-  Nuevo y Tipo maquinaria opcionales).
+  mapa por provincia y lista de negocios con etapa anterior (columna
+  Tipo maquinaria opcional).
 - **Clasificación Manual**: selección de un reporte y guardado en cola; el
   botón *Sincronizar* del sidebar lo escribe en Sheets.
 
