@@ -65,3 +65,26 @@ def style_bitrix_table(df: pd.DataFrame, stage_col: str = "Etapa") -> Styler:
         return _row_styler(color, stage_col)(row)
 
     return df.style.apply(apply_all, axis=1)
+
+
+def short_labels(labels: Iterable[str], max_len: int = 20) -> list[str]:
+    """Acorta etiquetas largas para leyendas: saca el texto entre paréntesis y
+    el punto final, y corta en el último espacio antes de ``max_len`` con "…".
+    Si dos etiquetas quedan iguales, les agrega un número para distinguirlas."""
+    import re
+
+    out: list[str] = []
+    seen: dict[str, int] = {}
+    for raw in labels:
+        t = re.sub(r"\s*\([^)]*\)", "", str(raw)).strip().rstrip(".").strip() or str(raw).strip()
+        if len(t) > max_len:
+            cut = t[:max_len]
+            # Cortar en un espacio sólo si no se pierden más de 6 caracteres;
+            # si no, cortar dentro de la palabra ("Sin respuesta inicia…").
+            if t[max_len] != " " and " " in cut and len(cut.rsplit(" ", 1)[0]) >= max_len - 6:
+                cut = cut.rsplit(" ", 1)[0]
+            t = cut.rstrip(" ,;:-") + "…"
+        n = seen.get(t, 0)
+        seen[t] = n + 1
+        out.append(t if n == 0 else f"{t} ({n + 1})")
+    return out

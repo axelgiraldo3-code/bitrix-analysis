@@ -510,7 +510,7 @@ def set_last_bitrix_sync(year_month: str, ts: Optional[datetime] = None) -> None
 # Índice de teléfonos de todos los deals de venta (pestaña _bitrix_telefonos)
 # ---------------------------------------------------------------------------
 _PHONE_INDEX_TAB = "_bitrix_telefonos"
-PHONE_INDEX_HEADERS = ["_phone_sig", "Cliente", "Telefono"]
+PHONE_INDEX_HEADERS = ["_phone_sig", "Cliente", "Telefono", "Negocio"]
 _PHONE_INDEX_META = "bitrix_phone_index"
 
 

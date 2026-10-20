@@ -22,8 +22,9 @@ from utils.branding import (
     COTEAR_BLUE,
     COTEAR_GRAY,
 )
+from utils.machinery import classify_machinery
 from utils.phone_ar import province_of, significant_ar
-from utils.styling import style_bitrix_table, style_bot_table
+from utils.styling import short_labels, style_bitrix_table, style_bot_table
 
 
 st.set_page_config(
@@ -55,6 +56,11 @@ def section(name: str):
     return st.container(border=True, key=f"seccion_{name}")
 
 
+def _n(n: int, unit: str) -> str:
+    """'1 consulta' / '3 consultas'."""
+    return f"{n} {unit if n != 1 else unit[:-1]}"
+
+
 def _csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode(CSV_ENCODING)
 
@@ -64,8 +70,49 @@ st.markdown(
     f"""
     <style>
       h1, h2, h3 {{ color: {COTEAR_BLUE}; font-weight: 800; }}
-      .stTabs [data-baseweb="tab"] {{ font-weight: 700; }}
-      .stTabs [aria-selected="true"] {{ color: {COTEAR_BLUE}; }}
+      /* Pestañas: sólo la seleccionada se resalta (fondo azul Cotear, borde
+         y texto blancos). Selectores por rol ARIA: sirven para las pestañas
+         de Streamlit viejas (baseweb) y nuevas (react-aria). */
+      .stTabs [role="tablist"] {{
+        gap: 6px;
+        background-color: transparent;
+        padding: 4px 0;
+        border: none;
+        border-bottom: 1px solid #DDE2E6;
+      }}
+      .stTabs [role="tab"] {{
+        background-color: transparent;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        padding: 0.45rem 1.25rem;
+        height: auto;
+        cursor: pointer;
+      }}
+      .stTabs [role="tab"] p {{
+        color: {COTEAR_GRAY};
+        font-weight: 700;
+        font-size: 1rem;
+      }}
+      .stTabs [role="tab"]:hover {{ background-color: #EEF3F8; }}
+      .stTabs [role="tab"]:hover p {{ color: {COTEAR_BLUE}; }}
+      .stTabs [role="tab"][aria-selected="true"] {{
+        background-color: {COTEAR_BLUE};
+        border: 1px solid #FFFFFF;
+      }}
+      .stTabs [role="tab"][aria-selected="true"] p {{ color: #FFFFFF; }}
+      .stTabs .react-aria-SelectionIndicator,
+      .stTabs [data-baseweb="tab-highlight"],
+      .stTabs [data-baseweb="tab-border"] {{ display: none; }}
+      /* Tarjetas de KPI: cada indicador con su propio marco */
+      div[data-testid="stMetric"] {{
+        background-color: #FFFFFF;
+        border: 1px solid #DDE2E6;
+        border-radius: 12px;
+        padding: 0.8rem 1rem;
+        min-height: 128px;
+      }}
+      /* El "delta" de los KPI es un dato de apoyo, no una variación: sin flecha */
+      div[data-testid="stMetricDelta"] svg {{ display: none; }}
       .cotear-muted {{ color: {COTEAR_GRAY}; font-size: 0.9rem; }}
       /* Marco de secciones (st.container con key "seccion_*") */
       div[class*="st-key-seccion_"] {{
@@ -118,6 +165,9 @@ def _bitrix_snapshot_from_sheets(year_month: str) -> pd.DataFrame:
         return df
     df = df.copy()
     df["_phone_sig"] = df["Telefono"].map(significant_ar)
+    # El tipo se recalcula siempre: el snapshot puede haberse guardado con
+    # una versión anterior del clasificador.
+    df["Tipo maquinaria"] = df["Nombre negocio"].map(classify_machinery)
     return df
 
 
@@ -193,6 +243,9 @@ def load_phone_index(force_refresh: bool = False) -> tuple[pd.DataFrame, str]:
     except Exception as e:
         df, ts, warn = pd.DataFrame(columns=sheets.PHONE_INDEX_HEADERS), None, f"No se pudo leer el índice de teléfonos: {e}"
     stale = ts is None or (datetime.now() - ts).days >= PHONE_INDEX_TTL_DAYS
+    # Índices guardados antes de existir la columna Negocio: refrescar una vez
+    if not df.empty and not df.get("Negocio", pd.Series(dtype=str)).astype(str).str.strip().any():
+        stale = True
     if force_refresh or stale:
         try:
             with st.spinner("Actualizando índice de teléfonos de Bitrix24 (todos los negocios)…"):
@@ -361,6 +414,18 @@ lookup = pd.concat(
 ).fillna("")
 lookup = lookup[lookup["_phone_sig"] != ""].drop_duplicates("_phone_sig", keep="first")
 
+# Teléfono → negocio(s): los del mes primero, después el índice de todos los negocios
+_month_deals = (bitrix_df[bitrix_df["_phone_sig"].astype(str) != ""]
+                .groupby("_phone_sig")["Nombre negocio"]
+                .agg(lambda t: " | ".join(dict.fromkeys(x for x in t if x)))
+                .reset_index().rename(columns={"Nombre negocio": "Negocio"})
+                if not bitrix_df.empty else pd.DataFrame(columns=["_phone_sig", "Negocio"]))
+deal_lookup = pd.concat(
+    [_month_deals, phone_index.reindex(columns=["_phone_sig", "Negocio"])],
+    ignore_index=True,
+).fillna("")
+deal_lookup = deal_lookup[deal_lookup["Negocio"].astype(str).str.strip() != ""]
+
 try:
     ignored = sheets.load_ignored_phones()
 except Exception as e:
@@ -374,6 +439,7 @@ month_df = apply_persisted(
 )
 sync_month_if_changed(selected_month, month_df, ignored)
 month_df["Area"] = month_df["Area de interes"].map(cache.area_bucket)
+month_df = cache.attach_deal_names(month_df, deal_lookup)
 
 
 # -----------------------------------------------------------------------------
@@ -386,20 +452,23 @@ tab_reportes, tab_negocios, tab_clasif = st.tabs([
 ])
 
 
-def _zone_pie(counts: pd.DataFrame, filename: str, height: int = 420) -> None:
-    """Torta de zonas + tabla al costado."""
+def _zone_map(zones: pd.Series, filename: str, unit: str) -> None:
+    """Mapa coroplético por provincia + tabla de zonas al costado."""
+    total = int(len(zones))
+    counts = geo.zone_counts(zones, threshold=0)
     c1, c2 = st.columns([2, 1])
     with c1:
-        colors = {z: COTEAR_GRAY for z in (geo.OTHERS,)}
-        fig = px.pie(counts, names="Zona", values="Cantidad", hole=0.35,
-                     color="Zona", color_discrete_map=colors,
-                     color_discrete_sequence=px.colors.qualitative.Safe)
-        fig.update_traces(sort=False)
-        fig.update_layout(height=height, margin=dict(t=30, b=30, l=30, r=30),
-                          paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig, width="stretch", config=_png_config(filename))
+        fig = geo.province_map(counts, total, unit=unit)
+        if fig.data:
+            st.plotly_chart(fig, width="stretch", config=_png_config(filename))
+        else:
+            st.info("Ninguna consulta pudo ubicarse en una provincia.")
     with c2:
         st.dataframe(counts, hide_index=True, width="stretch")
+    note = geo.outside_map_note(counts, total, unit=unit)
+    st.caption("Provincia según el código de área del teléfono; el % es sobre el total. "
+               "Sólo se muestran las provincias con datos."
+               + (f" Fuera del mapa: {note}." if note else ""))
 
 
 # =============================================================================
@@ -425,9 +494,9 @@ with tab_reportes:
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Consultas del mes", total)
             k2.metric("Provincia con más consultas", zona_top,
-                      delta=f"{zona_n} consultas" if zona_n else None, delta_color="off")
+                      delta=_n(zona_n, "consultas") if zona_n else None, delta_color="off")
             k3.metric("Área de interés principal", area_top,
-                      delta=f"{area_n} consultas" if area_n else None, delta_color="off")
+                      delta=_n(area_n, "consultas") if area_n else None, delta_color="off")
             k4.metric("Sin interés real", f"{pct_sin_interes_real:.1f} %",
                       help="% de consultas clasificadas SIN RESPUESTAS o SIN INTERES")
 
@@ -482,15 +551,13 @@ with tab_reportes:
         # --- Zonas geográficas -------------------------------------------
         with section("zonas_consultas"):
             st.markdown("### Consultas por provincia")
-            _zone_pie(geo.zone_counts(month_df["Zona"]), f"zonas_consultas_{selected_month}")
-            st.caption("Provincia según el código de área del teléfono. Las provincias "
-                       "más chicas se agrupan en Otros mientras sumen menos del 10 %.")
+            _zone_map(month_df["Zona"], f"mapa_consultas_{selected_month}", unit="consultas")
 
         # --- Tabla de datos ----------------------------------------------
         with section("tabla_consultas"):
             st.markdown(f"### Tabla de datos con clasificación agregada ({total} consultas)")
             display_cols = ["Fecha", "Nombre", "Numero", "Zona", "Area de interes",
-                            "Clasificacion interna"]
+                            "Negocio", "Clasificacion interna"]
             st.dataframe(style_bot_table(month_df[display_cols]),
                          hide_index=True, width="stretch")
             st.download_button(
@@ -617,14 +684,14 @@ with tab_negocios:
                 r1[0].metric("Total con actividad", len(b))
                 r1[1].metric("Nuevos del período", int((b["Nuevo"] == "Sí").sum()))
                 r1[2].metric("Fuente destacada", fuente_top,
-                             delta=f"{fuente_n} negocios" if fuente_n else None, delta_color="off")
+                             delta=_n(fuente_n, "negocios") if fuente_n else None, delta_color="off")
                 r1[3].metric("Provincia con más negocios", zona_top_b,
-                             delta=f"{zona_n_b} negocios" if zona_n_b else None, delta_color="off")
+                             delta=_n(zona_n_b, "negocios") if zona_n_b else None, delta_color="off")
                 r2 = st.columns(4)
                 r2[0].metric("Negocios cerrados", int(mask_cerrado.sum()))
                 r2[1].metric("Ganados", int(mask_ganado.sum()))
                 r2[2].metric("Motivo de baja más frecuente", motivo_top,
-                             delta=f"{motivo_n} casos" if motivo_n else None, delta_color="off")
+                             delta=_n(motivo_n, "casos") if motivo_n else None, delta_color="off")
                 r2[3].metric("Vida de negocio", vida_label, help=vida_help)
 
             # --- Tipo de máquina × etapa -------------------------------------
@@ -637,7 +704,7 @@ with tab_negocios:
                 pivot["Total"] = pivot.sum(axis=1)
                 pivot = pivot.sort_values("Total", ascending=False)
 
-                modo = st.radio("Mostrar", ["Porcentaje", "Cantidad"], horizontal=True,
+                modo = st.radio("Mostrar", ["Cantidad", "Porcentaje"], horizontal=True,
                                 key="bitrix_bar_mode")
                 long = pivot.drop(columns=["Total"]).reset_index().melt(
                     id_vars="Tipo maquinaria", var_name="Etapa", value_name="Cantidad")
@@ -680,35 +747,50 @@ with tab_negocios:
                 else:
                     motivos = (perdidos["Motivo de baja"].astype(str).str.strip()
                                .value_counts().reset_index())
-                    motivos.columns = ["Motivo", "Cantidad"]
+                    motivos.columns = ["Motivo completo", "Cantidad"]
+                    motivos.insert(0, "Motivo", short_labels(motivos["Motivo completo"]))
                     motivos["%"] = (motivos["Cantidad"] / motivos["Cantidad"].sum() * 100).round(1)
                     mc1, mc2 = st.columns([2, 1])
                     with mc1:
-                        fig_mot = px.pie(motivos, names="Motivo", values="Cantidad", hole=0.35)
+                        fig_mot = px.pie(motivos, names="Motivo", values="Cantidad", hole=0.35,
+                                         custom_data=["Motivo completo"])
+                        fig_mot.update_traces(
+                            hovertemplate="%{customdata[0]}<br>%{value} negocios "
+                                          "(%{percent})<extra></extra>")
                         fig_mot.update_layout(height=420, margin=dict(t=30, b=30, l=30, r=30),
-                                              paper_bgcolor="rgba(0,0,0,0)")
+                                              paper_bgcolor="rgba(0,0,0,0)",
+                                              legend=dict(font=dict(size=12)))
                         st.plotly_chart(fig_mot, width="stretch",
                                         config=_png_config(f"motivos_baja_{period_label}"))
                     with mc2:
-                        st.dataframe(motivos, hide_index=True, width="stretch")
+                        st.dataframe(motivos[["Motivo", "Cantidad", "%"]], hide_index=True,
+                                     width="stretch")
+                    st.caption("Los motivos largos se muestran abreviados; el texto "
+                               "completo aparece al pasar el mouse sobre el gráfico.")
 
             # --- Zonas geográficas -------------------------------------------
             with section("zonas_negocios"):
                 st.markdown("### Negocios por provincia")
-                _zone_pie(geo.zone_counts(b["Zona"]), f"zonas_negocios_{period_label}")
-                st.caption("Provincia según el código de área del teléfono del contacto. "
-                           "Sin identificar incluye contactos sin teléfono o con email.")
+                _zone_map(b["Zona"], f"mapa_negocios_{period_label}", unit="negocios")
 
             # --- Lista --------------------------------------------------------
             with section("lista_negocios"):
                 listing_cols = [
                     "Nuevo", "Fecha movimiento", "Fecha creacion", "Nombre negocio",
-                    "Cliente", "Compania", "Etapa", "Etapa anterior", "Fuente",
-                    "Motivo de baja", "Telefono", "Zona",
+                    "Tipo maquinaria", "Cliente", "Compania", "Etapa", "Etapa anterior",
+                    "Fuente", "Motivo de baja", "Telefono", "Zona",
                 ]
+                optional_cols = ["Nuevo", "Tipo maquinaria"]
                 listing = b[[c for c in listing_cols if c in b.columns]]
                 st.markdown(f"### Lista de negociaciones con actividad en el período ({len(listing)})")
-                st.dataframe(style_bitrix_table(listing), hide_index=True, width="stretch")
+                # Ocultas de entrada; se muestran desde el menú de columnas (ícono
+                # del ojo) de la tabla, sin recargar la app.
+                st.dataframe(
+                    style_bitrix_table(listing), hide_index=True, width="stretch",
+                    column_config={c: {"hidden": True} for c in optional_cols},
+                )
+                st.caption("Las columnas Nuevo y Tipo maquinaria están ocultas: "
+                           "activalas desde el ícono 👁 de la tabla.")
                 st.download_button(
                     "⬇️ Descargar actividad del período (CSV)",
                     data=_csv(listing),
