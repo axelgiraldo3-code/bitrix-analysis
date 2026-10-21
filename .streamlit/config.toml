@@ -1,9 +1,26 @@
+# Tema claro Cotear, estilo dashboard: fondo gris muy claro, tarjetas blancas
+# (ver utils/ui.py) y azul Cotear como acento.
 [theme]
+base = "light"
 primaryColor = "#01498E"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F2F4F5"
-textColor = "#2B2F33"
+backgroundColor = "#F4F6F9"
+secondaryBackgroundColor = "#EBEFF3"
+textColor = "#1F2933"
+borderColor = "#E3E8EE"
+linkColor = "#01498E"
 font = "sans serif"
+baseRadius = "0.6rem"
+showSidebarBorder = true
+chartCategoricalColors = ["#01498E", "#E67E22", "#11734B", "#39A8EF", "#B10202", "#5A3286", "#C9A400", "#2BB3A3", "#D35FB7", "#7B868C"]
+dataframeHeaderBackgroundColor = "#F4F6F9"
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6F9"
+textColor = "#1F2933"
+borderColor = "#E3E8EE"
+primaryColor = "#01498E"
+linkColor = "#01498E"
 
 [server]
 headless = true

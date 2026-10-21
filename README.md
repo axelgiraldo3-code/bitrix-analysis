@@ -26,8 +26,17 @@ Aplicación Streamlit para analizar los reportes del bot de WhatsApp
 ## Estructura
 
 ```
-app.py                      Punto de entrada Streamlit (3 tabs)
+app.py                      Punto de entrada: estilos, datos comunes, barra lateral y navegación
+views/
+  reporte.py                Página "Reporte mensual" (consultas del bot)
+  negocios.py               Página "Negocios Bitrix24"
+  clasificacion.py          Página "Clasificación manual"
+  common.py                 Filtro de mes y tarjeta de provincias (mapa + ranking)
 utils/
+  data.py                   Carga con caché (bot, Bitrix, índice) y armado del mes / período
+  ui.py                     CSS y componentes: KPI, tarjeta gráfico ⇄ datos, datos crudos
+  charts.py                 Opciones de ECharts (torta, barras, columnas apiladas)
+  kpis.py                   Variación de KPIs contra el período anterior
   sheets.py                 gspread I/O (fuente, pestañas mensuales, índice de teléfonos)
   bitrix.py                 Cliente REST Bitrix24 (batch, rate limit) + normalización de deals
   phone_ar.py               Formato '+54 9 <area> <local>' y provincia por código de área
@@ -35,7 +44,7 @@ utils/
   cache.py                  Limpieza, unificación mensual, reglas automáticas, áreas
   machinery.py              Clasificación de maquinaria por nombre del negocio
   pending.py                Cola de clasificaciones sin sincronizar
-  periods.py                Rangos de mes / trimestre / año
+  periods.py                Rangos de mes / trimestre / año y período anterior
   branding.py, styling.py   Colores Cotear y coloreo de tablas
 data/
   codigos_area_argentina.json   Código de área → provincia
@@ -43,23 +52,42 @@ data/
 scripts/                    Diagnóstico de Bitrix y creación del libro destino
 tests/                      Pruebas de funciones puras (pytest)
 .streamlit/
-  config.toml               Tema visual (azul #01498E)
+  config.toml               Tema visual claro (fondo gris, tarjetas blancas, azul #01498E)
   secrets.toml              (NO commitear)
 ```
 
-## Tabs
+## Páginas
 
-- **Reporte mensual**: indicadores (provincia y área principal, % sin
-  interés real = sin respuestas + sin interés), torta por clasificación, barras área de interés ×
-  clasificación, mapa por provincia y tabla de consultas con su negocio de Bitrix.
+Navegación y filtros (mes o período) en la barra lateral; sólo se ejecuta la
+página abierta.
+
+- **Reporte mensual**: KPIs con variación contra el mes anterior (consultas,
+  provincia y área principal, % sin interés real = sin respuestas + sin
+  interés), distribución por clasificación (torta ⇄ barras), área de interés ×
+  clasificación, mapa + ranking de provincias y datos crudos del mes.
 - **Negocios Bitrix24**: período libre (mes, trimestre, año, rango). Sólo
-  cuenta los negocios **creados** dentro del período (con su etapa actual); los
-  movimientos de negocios de períodos anteriores no se incluyen. KPIs,
-  barras tipo de máquina × etapa (% o cantidad) con su tabla, motivos de baja,
-  mapa por provincia y lista de negocios con etapa anterior (columna
-  Tipo maquinaria opcional).
-- **Clasificación Manual**: selección de un reporte y guardado en cola; el
-  botón *Sincronizar* del sidebar lo escribe en Sheets.
+  cuenta los negocios **creados** dentro del período (con su etapa actual). Los
+  KPIs se comparan con el período anterior de igual duración (mes, trimestre o
+  año anterior; en un rango, los mismos días justo antes). Tipo de máquina ×
+  etapa (cantidad ⇄ %), motivos de baja (torta ⇄ barras), mapa + ranking de
+  provincias y lista de negocios (columna Tipo maquinaria oculta).
+- **Clasificación manual**: selección de un reporte y guardado en cola; el
+  botón *Sincronizar* de la barra lateral lo escribe en Sheets.
+
+### Diseño
+
+- Gráficos con ECharts nativo (`st.echarts_chart`): tooltip al pasar el mouse,
+  sin controles de zoom y un ícono para descargar en PNG. El mapa de
+  provincias usa Plotly sin barra de herramientas (ECharts nativo no admite
+  contornos propios).
+- Cada tarjeta tiene el botón Gráfico ⇄ Datos: el gráfico se desliza y aparece
+  la tabla. Es sólo CSS (`on_change="ignore"`), no vuelve a ejecutar la app.
+  Cambiar el tipo de gráfico re-ejecuta sólo esa tarjeta (`st.fragment`).
+- KPIs: verde/rojo según la polaridad del indicador. Indicadores negativos
+  (bajar es bueno): % sin interés real, motivo de baja más frecuente y vida de
+  negocio. "En curso" se informa en gris.
+- Datos crudos al final, en un desplegable con su botón de descarga (CSV UTF-8
+  con BOM).
 
 ## Reglas automáticas de clasificación
 
