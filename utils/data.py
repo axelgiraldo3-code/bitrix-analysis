@@ -159,11 +159,13 @@ def process_month(month_bot: pd.DataFrame, lookup: pd.DataFrame,
     return df
 
 
-def apply_persisted(df: pd.DataFrame, year_month: str) -> pd.DataFrame:
+def apply_persisted(df: pd.DataFrame, year_month: str,
+                    sheet_df: pd.DataFrame | None = None) -> pd.DataFrame:
     """Superpone las clasificaciones guardadas en la hoja del mes y después la
-    cola de cambios pendientes (la cola pisa a lo persistido)."""
+    cola de cambios pendientes (la cola pisa a lo persistido). ``sheet_df``:
+    pestaña del mes ya leída (lectura en lote de varios meses)."""
     try:
-        persisted = sheets.load_persisted_classifications(year_month)
+        persisted = sheets.load_persisted_classifications(year_month, sheet_df)
     except Exception as e:
         st.warning(f"No se pudo leer la hoja del mes {year_month}: {e}")
         persisted = {}
@@ -266,6 +268,40 @@ def month_with_previous(bot_raw: pd.DataFrame, year_month: str
     if cache.filter_by_year_month(bot_raw, prev_ym).empty:
         return current, None
     return current, month_data(bot_raw, prev_ym, lookup, deal_lookup, ignored, persist=False)
+
+
+TREND_MONTHS = 6
+
+
+def bot_history(bot_raw: pd.DataFrame, year_month: str, current: pd.DataFrame,
+                prev: pd.DataFrame | None, n: int = TREND_MONTHS
+                ) -> list[tuple[str, pd.DataFrame | None]]:
+    """[(mes, consultas procesadas o None si no hay reportes), ...] de los
+    últimos ``n`` meses hasta ``year_month`` (el más viejo primero).
+
+    El mes actual y el anterior ya vienen procesados; los demás se procesan
+    acá con sus clasificaciones guardadas, leídas en un solo pedido a
+    Sheets. Sólo se leen, no se sincronizan."""
+    months = [periods.shift_months(year_month, -i) for i in range(n - 1, -1, -1)]
+    known = {year_month: current, periods.shift_months(year_month, -1): prev}
+    older = [m for m in months if m not in known
+             and not cache.filter_by_year_month(bot_raw, m).empty]
+    out = dict(known)
+    if older:
+        lookup, deal_lookup = lookups(year_month)
+        ignored = load_ignored()
+        try:
+            tabs = sheets.read_months_batch(tuple(older), "Bot")
+        except Exception as e:
+            st.warning(f"No se pudieron leer las clasificaciones de meses anteriores: {e}")
+            tabs = {}
+        for m in older:
+            month_bot = cache.filter_by_year_month(bot_raw, m)
+            df = process_month(month_bot, lookup, frozenset(ignored))
+            df = apply_persisted(df, m, tabs.get(m, pd.DataFrame(columns=sheets.BOT_HEADERS)))
+            df["Area"] = df["Area de interes"].map(cache.area_bucket)
+            out[m] = df
+    return [(m, out.get(m)) for m in months]
 
 
 # -----------------------------------------------------------------------------

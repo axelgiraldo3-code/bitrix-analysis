@@ -14,7 +14,7 @@ from datetime import datetime
 import streamlit as st
 
 from utils import cache, data, pending, sheets, ui
-from views import clasificacion, negocios, reporte
+from views import analisis, clasificacion, negocios, reporte
 
 st.set_page_config(
     page_title="COTEAR — Informe de Actividad Comercial",
@@ -68,6 +68,8 @@ page = st.navigation([
             url_path="negocios"),
     st.Page(clasificacion.render, title="Clasificación manual", icon=":material/fact_check:",
             url_path="clasificacion"),
+    st.Page(analisis.render, title="Análisis preliminar", icon=":material/science:",
+            url_path="analisis"),
 ])
 st.sidebar.markdown("### Filtros")
 page.run()
