@@ -7,7 +7,8 @@ import pandas as pd
 import streamlit as st
 
 from utils import charts, data, geo, kpis, periods, ui
-from utils.branding import BITRIX_STAGE_COLORS, BITRIX_STAGE_ORDER
+from utils.branding import (BITRIX_STAGE_COLORS, BITRIX_STAGE_ORDER, SOURCE_ORDER,
+                            canonical_source, source_color)
 from utils.styling import style_bitrix_table
 from views.common import zones_card
 
@@ -15,6 +16,10 @@ TYPE_PIE = ":material/donut_large:"
 TYPE_BAR = ":material/align_horizontal_left:"
 MODE_COUNT = "Cantidad"
 MODE_PCT = "Porcentaje"
+# Altura común de las tarjetas "tipo de máquina" y "motivos de baja"
+CHART_H = 500
+# Altura común de "por fuente" y "por provincia"
+BOTTOM_H = 380
 PERIOD_KINDS = ["Mes", "Trimestre", "Año", "Rango personalizado"]
 
 
@@ -111,9 +116,9 @@ def _kpis(cur: dict, prev: dict | None, vs: str) -> None:
     ui.kpi(r2[2], "Motivo de baja más frecuente", motivo, motivo_kw,
            help="Indicador negativo: que baje la cantidad de casos es bueno.")
     ui.kpi(r2[3], "Vida de negocio", vida_txt,
-           d("vida", kpis.DOWN_GOOD, unit=" días", decimals=1),
-           help=(f"Promedio sobre {cur['n_vida']} negocios cerrados (creación → último "
-                 "movimiento). Indicador negativo: que baje es bueno.")
+           d("vida", kpis.NEUTRAL, unit=" días", decimals=1),
+           help=(f"Días promedio entre la creación y el cierre (último movimiento) de "
+                 f"los {cur['n_vida']} negocios cerrados del período, ganados y perdidos.")
            if cur["vida"] is not None else "Sin negocios cerrados con fechas válidas")
 
 
@@ -141,17 +146,18 @@ def _maquina_card(b: pd.DataFrame, label: str) -> None:
                   for e in pivot.columns]
         ui.echart(charts.stacked_bars(pivot.index.tolist(), series, f"actividad_{label}",
                                       y_name="% dentro del tipo" if pct else "Negocios",
-                                      percent=pct, rotate=20 if len(pivot) > 5 else 0,
-                                      width=600),
-                  height=420)
+                                      percent=pct, rotate=90, width=600,
+                                      label_width=130),
+                  height=CHART_H)
 
     def table():
         t = pivot.copy()
         t["Total"] = t.sum(axis=1)
         st.dataframe(t.reset_index(), hide_index=True, width="stretch")
 
-    ui.chart_card("maquina_etapa", "Negocios por tipo de máquina y etapa", chart, table,
-                  controls=controls)
+    ui.chart_card("maquina_etapa", "Por máquina y etapa", chart, table,
+                  controls=controls,
+                  subtitle="Etapa actual de cada negocio, por tipo de máquina.")
 
 
 @st.fragment
@@ -179,8 +185,8 @@ def _motivos_card(b: pd.DataFrame, label: str) -> None:
             opt = charts.hbar(names, values, colors, f"motivos_baja_{label}", label_width=140)
         else:
             opt = charts.donut(names, values, colors, f"motivos_baja_{label}", width=400,
-                               height=420, label_width=130)
-        ui.echart(opt, height=420)
+                               height=CHART_H, label_width=130)
+        ui.echart(opt, height=CHART_H)
 
     def table():
         st.dataframe(motivos[["Motivo completo", "Cantidad", "%"]].rename(
@@ -188,8 +194,45 @@ def _motivos_card(b: pd.DataFrame, label: str) -> None:
             column_config={"%": st.column_config.NumberColumn(format="%.1f %%")})
 
     ui.chart_card("motivos", "Motivos de baja", chart, table, controls=controls,
-                  subtitle="Los motivos largos se cortan; el texto completo aparece al "
-                           "pasar el mouse.")
+                  subtitle="Por qué se perdieron los negocios.")
+
+
+def _canon_sources(df: pd.DataFrame | None) -> pd.DataFrame | None:
+    """Unifica los nombres de fuente (ej. "Email" → "Correo")."""
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    src = df["Fuente"] if "Fuente" in df else pd.Series("", index=df.index)
+    df["Fuente"] = src.map(canonical_source)
+    return df
+
+
+@st.fragment
+def _fuentes_card(b: pd.DataFrame, label: str) -> None:
+    counts = b["Fuente"].value_counts()
+    # Siempre las fuentes oficiales (aunque estén en 0) para comparar entre meses;
+    # al final, las que no están en la lista.
+    names = SOURCE_ORDER + [n for n in counts.index if n not in SOURCE_ORDER]
+    # Mayor a menor; a igual cantidad se respeta el orden de la lista
+    names = sorted(names, key=lambda n: -int(counts.get(n, 0)))
+    values = [int(counts.get(n, 0)) for n in names]
+    total = sum(values) or 1
+    table_df = pd.DataFrame({"Fuente": names, "Cantidad": values,
+                             "%": [round(v / total * 100, 1) for v in values]})
+
+    def chart():
+        ui.echart(charts.hbar(names, values, [source_color(n) for n in names],
+                              f"negocios_por_fuente_{label}", label_width=170),
+                  height=BOTTOM_H)
+        st.caption("Siempre se muestran todas las fuentes, aunque estén en 0. "
+                   "Sin fuente u otras no listadas, en gris.")
+
+    def table():
+        st.dataframe(table_df, hide_index=True, width="stretch",
+                     column_config={"%": st.column_config.NumberColumn(format="%.1f %%")})
+
+    ui.chart_card("fuentes", "Por fuente", chart, table,
+                  subtitle="Canal por el que llegó cada negocio.")
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +259,7 @@ def render() -> None:
     with st.spinner("Cargando negocios de Bitrix…"):
         b, sources, warns = data.deals_created_between(start, end, force_refresh=force)
         prev_b, prev_sources, prev_warns = data.deals_created_between(p_start, p_end)
+    b, prev_b = (_canon_sources(df) for df in (b, prev_b))
     for w in warns + prev_warns:
         st.warning(w)
 
@@ -230,14 +274,21 @@ def render() -> None:
     prev_ok = any(src != "error" for src in prev_sources.values())
     _kpis(_stats(b), _stats(prev_b) if prev_ok else None, f"vs. {prev_short}")
 
+    ui.section("Estado del pipeline")
     c1, c2 = st.columns([7, 5])
     with c1:
         _maquina_card(b, label)
     with c2:
         _motivos_card(b, label)
 
-    zones_card("zonas_negocios", "Negocios por provincia", b["Zona"], "negocios",
-               f"provincias_negocios_{label}")
+    ui.section("Distribución de negocios")
+    c3, c4 = st.columns(2)
+    with c3:
+        _fuentes_card(b, label)
+    with c4:
+        zones_card("zonas_negocios", "Por provincia", b["Zona"], "negocios",
+                   f"provincias_negocios_{label}", toggle=True, height=BOTTOM_H,
+                   subtitle="Provincia según el teléfono del cliente.")
 
     listing_cols = ["Fecha movimiento", "Fecha creacion", "Nombre negocio", "Tipo maquinaria",
                     "Cliente", "Compania", "Etapa", "Etapa anterior", "Fuente",
