@@ -36,6 +36,17 @@ def quarter_bounds(year: int, quarter: int) -> tuple[date, date]:
     return date(year, start_month, 1), date(year, end_month, end_day)
 
 
+def semester_bounds(year: int, semester: int) -> tuple[date, date]:
+    """Primer y último día del semestre (1: ene–jun, 2: jul–dic)."""
+    assert semester in (1, 2), semester
+    return (date(year, 1, 1), date(year, 6, 30)) if semester == 1 \
+        else (date(year, 7, 1), date(year, 12, 31))
+
+
+def current_semester(today: date) -> int:
+    return 1 if today.month <= 6 else 2
+
+
 def year_bounds(year: int) -> tuple[date, date]:
     """Primer y último día de un año calendario."""
     return date(year, 1, 1), date(year, 12, 31)
@@ -57,6 +68,7 @@ def previous_period(start: date, end: date, kind: str) -> tuple[date, date]:
     """Período inmediatamente anterior y de igual duración.
 
     ``kind``: "Mes" → mes anterior, "Trimestre" → trimestre anterior,
+    "Semestre" → semestre anterior,
     "Año" → año anterior; cualquier otro (rango) → los mismos días
     corridos justo antes de ``start``.
     """
@@ -67,6 +79,9 @@ def previous_period(start: date, end: date, kind: str) -> tuple[date, date]:
     if kind == "Trimestre":
         q = current_quarter(start)
         return quarter_bounds(start.year - 1, 4) if q == 1 else quarter_bounds(start.year, q - 1)
+    if kind == "Semestre":
+        return semester_bounds(start.year - 1, 2) if current_semester(start) == 1 \
+            else semester_bounds(start.year, 1)
     if kind == "Año":
         return year_bounds(start.year - 1)
     days = (end - start).days + 1
@@ -94,6 +109,8 @@ def period_label(start: date, end: date, kind: str, short: bool = False) -> str:
         return month_label(f"{start.year:04d}-{start.month:02d}", full=not short)
     if kind == "Trimestre":
         return f"T{current_quarter(start)} {start.year}"
+    if kind == "Semestre":
+        return f"S{current_semester(start)} {start.year}"
     if kind == "Año":
         return str(start.year)
     return f"{start.strftime('%d-%m-%y')} a {end.strftime('%d-%m-%y')}"

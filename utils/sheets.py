@@ -328,10 +328,35 @@ def batch_upsert_bot_rows(year_month: str, rows: list[dict],
     _apply_row_changes(year_month, ws, updates, appends)
 
 
-def load_persisted_classifications(year_month: str) -> dict[str, str]:
+@st.cache_data(ttl=900, show_spinner=False)
+def read_months_batch(year_months: tuple[str, ...], kind: str) -> dict[str, pd.DataFrame]:
+    """Varias pestañas mensuales en un solo pedido (para la tendencia de
+    meses anteriores): 1 lectura de la lista de pestañas + 1 lectura de
+    valores, en lugar de ~3 lecturas por mes. Cacheada 15 min. Los meses sin
+    pestaña vuelven vacíos."""
+    headers = _headers_for(kind)
+    out = {ym: pd.DataFrame(columns=headers) for ym in year_months}
+    if not year_months:
+        return out
+    sh = _open_dest()
+    titles = {ws.title for ws in _with_retry(sh.worksheets)}
+    wanted = [ym for ym in year_months if _month_tab_name(ym, kind) in titles]
+    if not wanted:
+        return out
+    ranges = [f"'{_month_tab_name(ym, kind)}'" for ym in wanted]
+    resp = _with_retry(lambda: sh.values_batch_get(ranges))
+    for ym, vr in zip(wanted, resp.get("valueRanges", [])):
+        out[ym] = _values_to_df(vr.get("values", []), headers)
+    return out
+
+
+def load_persisted_classifications(year_month: str,
+                                   df: Optional[pd.DataFrame] = None) -> dict[str, str]:
     """Devuelve {Numero: Clasificacion interna} de la pestaña mensual,
-    ignorando vacíos y el placeholder SIN CLASIFICAR (filas viejas)."""
-    df = read_month_dataframe(year_month, "Bot")
+    ignorando vacíos y el placeholder SIN CLASIFICAR (filas viejas).
+    ``df``: pestaña ya leída (ej. con ``read_months_batch``)."""
+    if df is None:
+        df = read_month_dataframe(year_month, "Bot")
     if df.empty:
         return {}
     out = {}
@@ -455,17 +480,21 @@ _META_TAB = "_meta"
 _META_HEADERS = ["clave", "valor"]
 
 
-def _get_meta(key: str) -> str:
-    """Lee una clave arbitraria de la pestaña _meta."""
+@st.cache_data(ttl=60, show_spinner=False)
+def _meta_values() -> dict[str, str]:
+    """Toda la pestaña _meta en una lectura (cacheada 60 s): las fechas de
+    sincronización de varios meses no hacen una lectura cada una."""
     sh = _open_dest()
     try:
         ws = sh.worksheet(_META_TAB)
     except gspread.WorksheetNotFound:
-        return ""
-    for row in ws.get_all_values()[1:]:
-        if len(row) >= 2 and row[0] == key:
-            return row[1]
-    return ""
+        return {}
+    return {row[0]: row[1] for row in ws.get_all_values()[1:] if len(row) >= 2 and row[0]}
+
+
+def _get_meta(key: str) -> str:
+    """Lee una clave arbitraria de la pestaña _meta."""
+    return _meta_values().get(key, "")
 
 
 def _set_meta(key: str, value: str) -> None:
@@ -476,8 +505,13 @@ def _set_meta(key: str, value: str) -> None:
         if len(row) >= 1 and row[0] == key:
             ws.update(range_name=f"A{i}:B{i}", values=[[key, value]],
                       value_input_option="RAW")
-            return
-    ws.append_row([key, value], value_input_option="RAW")
+            break
+    else:
+        ws.append_row([key, value], value_input_option="RAW")
+    try:
+        _meta_values.clear()
+    except Exception:
+        pass
 
 
 @st.cache_data(ttl=60, show_spinner=False)

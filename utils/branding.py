@@ -1,4 +1,6 @@
 """Colores y utilidades de branding de Cotear SRL."""
+import hashlib
+import re
 import unicodedata
 
 COTEAR_BLUE = "#01498E"
@@ -115,3 +117,40 @@ def canonical_source(value) -> str:
 
 def source_color(name: str) -> str:
     return SOURCE_COLORS.get(name, SOURCE_OTHER_COLOR)
+
+
+# Motivos de baja con color fijo. El nombre se unifica sin tildes ni
+# mayúsculas y sin la explicación entre paréntesis ("Sin respuesta inicial
+# (el interesado no responde...)" → "Sin respuesta inicial"). Se reconocen
+# por el comienzo del texto.
+MOTIVO_COLORS = {
+    "sin respuesta inicial": "#01498E",
+    "sin repuestas":         "#E67E22",
+    "precio alto":           "#11734B",
+    "necesidad de producto": "#39A8EF",
+    "sin interes real":      "#B10202",
+}
+# Motivos nuevos: color estable según el nombre (no según el orden del mes)
+_MOTIVO_SPARE = ["#5A3286", "#C9A400", "#2BB3A3", "#D35FB7", "#8E5B2E", "#34495E"]
+
+
+def canonical_motivo(value) -> str:
+    """Motivo sin la explicación entre paréntesis ni espacios de más; vacío → ""."""
+    if value is None or str(value).strip() in ("", "nan", "None"):
+        return ""
+    text = re.sub(r"\s*\(.*$", "", str(value).strip()).strip(" .,;:-")
+    text = " ".join(text.split())
+    return text[:1].upper() + text[1:] if text else ""
+
+
+def motivo_color(name: str) -> str:
+    key = _plain(name)
+    for prefix, color in MOTIVO_COLORS.items():
+        if key.startswith(prefix):
+            return color
+    digest = int(hashlib.md5(key.encode("utf-8")).hexdigest(), 16)
+    return _MOTIVO_SPARE[digest % len(_MOTIVO_SPARE)]
+
+
+# Acento lateral de los KPI de Negocios: fila "Volumen" (azul) y "Resultado"
+KPI_ACCENT_RESULT = "#39A8EF"

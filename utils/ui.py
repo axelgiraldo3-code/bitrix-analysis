@@ -15,7 +15,8 @@ from typing import Callable, Optional
 import pandas as pd
 import streamlit as st
 
-from .branding import COTEAR_BLUE
+from . import charts, periods
+from .branding import COTEAR_BLUE, KPI_ACCENT_RESULT
 
 CSV_ENCODING = "utf-8-sig"  # BOM: Excel en español muestra bien las tildes
 
@@ -77,6 +78,12 @@ def inject_css() -> None:
         box-shadow: var(--ct-shadow);
         padding: 1rem 1.15rem .9rem 1.15rem;
       }}
+      /* Tarjetas lado a lado: todas las de la fila con el mismo alto */
+      div[data-testid="stColumn"] div[data-testid="stLayoutWrapper"]:has(div[class*="st-key-card_"]),
+      div[data-testid="stColumn"] div[data-testid="stVerticalBlock"]:has(> div[data-testid="stLayoutWrapper"] > div[class*="st-key-card_"]) {{
+        flex: 1 1 auto;
+      }}
+      div[data-testid="stColumn"] div[class*="st-key-card_"] {{ height: 100%; }}
       .ct-card-title {{ font-size: 1.02rem; font-weight: 700; color: var(--ct-text); line-height: 1.3; }}
       .ct-card-sub {{ font-size: .8rem; color: var(--ct-muted); }}
       /* Título de grupo de tarjetas */
@@ -89,16 +96,25 @@ def inject_css() -> None:
       .ct-section-sub {{ font-size: .8rem; color: var(--ct-muted); margin: .1rem 0 0 .1rem; }}
       div[class*="st-key-cardctl_"] {{ flex-shrink: 0; }}
 
-      /* KPIs: tarjeta blanca con acento lateral azul */
-      div[data-testid="stMetric"] {{
+      /* KPIs: tarjeta blanca con acento lateral azul. La tarjeta es la
+         columna completa (indicador + mini línea de tendencia), así todas
+         las de una fila tienen el mismo alto. */
+      div[class*="st-key-kpis_"] div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"] {{
         background: var(--ct-card);
-        border: 1px solid var(--ct-line) !important;
-        border-left: 4px solid var(--ct-blue) !important;
-        border-radius: 12px !important;
+        border: 1px solid var(--ct-line);
+        border-left: 4px solid var(--ct-blue);
+        border-radius: 12px;
         box-shadow: var(--ct-shadow);
-        padding: .85rem 1rem .8rem 1rem;
-        min-height: 150px;
+        padding: .85rem 1rem .55rem 1rem;
+        min-height: 150px; height: 100%;
+        justify-content: space-between; gap: .25rem;
       }}
+      div[class*="st-key-kpis_resultado"] div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"] {{
+        border-left-color: {KPI_ACCENT_RESULT};
+      }}
+      div[data-testid="stMetric"] {{ background: transparent; padding: 0; }}
+      /* Sin la barra de Streamlit (descargar / pantalla completa) en la mini línea */
+      div[class*="st-key-kpis_"] [data-testid="stElementToolbar"] {{ display: none !important; }}
       [data-testid="stMetricLabel"] p {{
         color: var(--ct-muted); font-size: .74rem; font-weight: 700;
         letter-spacing: .06em; text-transform: uppercase;
@@ -193,9 +209,35 @@ def section(title: str, subtitle: str = "") -> None:
     st.markdown(f"<div class='ct-section'>{title}</div>{sub}", unsafe_allow_html=True)
 
 
-def kpi(col, label: str, value, delta: dict, help: Optional[str] = None) -> None:
-    """``delta`` = kwargs de ``utils.kpis.delta_kwargs`` / ``category_kwargs``."""
-    col.metric(label, value, help=help, **delta)
+def _trend_color(delta: dict) -> str:
+    """Color de la mini línea: el mismo criterio que la variación del KPI
+    (verde si mejora, rojo si empeora, gris si es neutra o sin cambios)."""
+    d, mode = delta.get("delta"), delta.get("delta_color", "normal")
+    if d in (None, 0) or mode == "off":
+        return charts.SPARK_FLAT
+    up = not str(d).strip().startswith("-")
+    good = up if mode == "normal" else not up
+    return charts.SPARK_UP if good else charts.SPARK_DOWN
+
+
+def kpi(col, label: str, value, delta: dict, help: Optional[str] = None,
+        trend: Optional[list] = None, months: Optional[list[str]] = None,
+        unit: str = "") -> None:
+    """``delta`` = kwargs de ``utils.kpis.delta_kwargs`` / ``category_kwargs``.
+    ``trend``: valores de los últimos meses (el último es el actual) y
+    ``months`` sus 'YYYY-MM', para la mini línea de tendencia (no se dibuja
+    con menos de 2 valores)."""
+    with col:
+        _call(st.metric, label, value, help=help, **delta)
+        if trend and months and len([v for v in trend if v is not None]) >= 2:
+            labels = [periods.MONTHS_ES[int(m[5:7]) - 1].capitalize() for m in months]
+            echart(charts.sparkline(labels, trend, _trend_color(delta), unit=unit), height=56)
+
+
+def kpi_row(key: str, n: int = 4):
+    """Fila de KPIs dentro de un contenedor con clave (para el color del
+    acento lateral por fila: ``kpis_<key>``)."""
+    return st.container(key=f"kpis_{key}").columns(n)
 
 
 # ---------------------------------------------------------------------------
