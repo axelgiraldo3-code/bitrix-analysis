@@ -164,7 +164,7 @@ def hbar(names: Sequence[str], values: Sequence[float], colors: Sequence[str] | 
 
 def stacked_bars(categories: Sequence[str], series: Sequence[tuple[str, Sequence[float], str]],
                  filename: str, *, y_name: str = "", percent: bool = False,
-                 rotate: int = 0, width: int = 720) -> dict:
+                 rotate: int = 0, width: int = 720, label_width: int = 110) -> dict:
     """Columnas apiladas. ``series`` = [(nombre, valores, color), ...].
     Los segmentos en 0 no muestran etiqueta."""
     # Altura de la columna más alta: los segmentos muy finos (< 4 % de esa
@@ -200,7 +200,8 @@ def stacked_bars(categories: Sequence[str], series: Sequence[tuple[str, Sequence
                   "axisTick": {"show": False},
                   "axisLine": {"lineStyle": {"color": "#D5DBE1"}},
                   "axisLabel": {"color": TEXT, "rotate": rotate, "interval": 0,
-                                "width": 110, "overflow": "truncate"}},
+                                "width": label_width, "overflow": "truncate"},
+                  "tooltip": {"show": True}},
         "yAxis": _value_axis(y_name, percent),
         "series": out_series,
     }

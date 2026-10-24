@@ -63,7 +63,7 @@ def inject_css() -> None:
 
       /* Encabezado de página */
       .ct-eyebrow {{
-        color: var(--ct-blue); font-size: .75rem; font-weight: 700;
+        color: var(--ct-blue); font-size: 1.125rem; font-weight: 700;
         letter-spacing: .08em; text-transform: uppercase; margin-bottom: .1rem;
       }}
       body .stApp h1 {{ color: var(--ct-text); font-weight: 800; letter-spacing: -.01em; }}
@@ -79,6 +79,15 @@ def inject_css() -> None:
       }}
       .ct-card-title {{ font-size: 1.02rem; font-weight: 700; color: var(--ct-text); line-height: 1.3; }}
       .ct-card-sub {{ font-size: .8rem; color: var(--ct-muted); }}
+      /* Título de grupo de tarjetas */
+      .ct-section {{
+        font-size: 1.17rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+        color: var(--ct-blue); margin: .9rem 0 0 .1rem;
+        display: flex; align-items: center; gap: .6rem;
+      }}
+      .ct-section::after {{ content: ""; flex: 1; height: 1px; background: var(--ct-line); }}
+      .ct-section-sub {{ font-size: .8rem; color: var(--ct-muted); margin: .1rem 0 0 .1rem; }}
+      div[class*="st-key-cardctl_"] {{ flex-shrink: 0; }}
 
       /* KPIs: tarjeta blanca con acento lateral azul */
       div[data-testid="stMetric"] {{
@@ -178,6 +187,12 @@ def page_header(title: str, subtitle: str = "") -> None:
         st.space("small")
 
 
+def section(title: str, subtitle: str = "") -> None:
+    """Título de un grupo de tarjetas relacionadas."""
+    sub = f"<div class='ct-section-sub'>{subtitle}</div>" if subtitle else ""
+    st.markdown(f"<div class='ct-section'>{title}</div>{sub}", unsafe_allow_html=True)
+
+
 def kpi(col, label: str, value, delta: dict, help: Optional[str] = None) -> None:
     """``delta`` = kwargs de ``utils.kpis.delta_kwargs`` / ``category_kwargs``."""
     col.metric(label, value, help=help, **delta)
@@ -209,18 +224,22 @@ def chart_card(key: str, title: str, render_chart: Callable[[], None],
     a ``chart_card`` desde una función decorada con ``@st.fragment``.
     """
     with st.container(border=True, key=f"card_{key}"):
-        with _call(st.container, horizontal=True, vertical_alignment="center",
+        with _call(st.container, horizontal=True, vertical_alignment="top",
                    key=f"cardhead_{key}", gap="small"):
             _call(st.markdown, _title_html(title, subtitle), unsafe_allow_html=True,
                   width="stretch")
-            if controls:
-                controls()
-            # on_change="ignore": alternar no ejecuta la app, sólo cambia el CSS.
-            _call(
-                st.segmented_control, "Vista", [VIEW_CHART, VIEW_DATA], default=VIEW_CHART, required=True,
-                key=f"view_{key}", on_change="ignore", label_visibility="collapsed",
-                help=_VIEW_HELP,
-            )
+            # Controles apilados a la derecha: el título conserva el ancho y
+            # todas las tarjetas tienen el mismo alto de encabezado.
+            with _call(st.container, horizontal_alignment="right", gap="small",
+                       width="content", key=f"cardctl_{key}"):
+                if controls:
+                    controls()
+                # on_change="ignore": alternar no ejecuta la app, sólo cambia el CSS.
+                _call(
+                    st.segmented_control, "Vista", [VIEW_CHART, VIEW_DATA], default=VIEW_CHART,
+                    required=True, key=f"view_{key}", on_change="ignore",
+                    label_visibility="collapsed", help=_VIEW_HELP,
+                )
         with st.container(key=f"flip_{key}"):
             with st.container(key=f"front_{key}"):
                 render_chart()

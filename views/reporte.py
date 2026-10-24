@@ -45,7 +45,7 @@ def _distribucion_card(df: pd.DataFrame, month: str) -> None:
         st.dataframe(counts, hide_index=True, width="stretch",
                      column_config={"%": st.column_config.NumberColumn(format="%.1f %%")})
 
-    ui.chart_card("distribucion", "Distribución por clasificación", chart, table,
+    ui.chart_card("distribucion", "Por clasificación", chart, table,
                   controls=controls)
 
 
@@ -69,7 +69,7 @@ def _area_card(df: pd.DataFrame, month: str) -> None:
         st.caption("Áreas sin texto o sin coincidencia con Máquinas, Repuestos o "
                    "Servicio Técnico se cuentan como No identificado.")
 
-    ui.chart_card("area", "Área de interés por clasificación", chart, table)
+    ui.chart_card("area", "Por área de interés", chart, table)
 
 
 def _kpis(df: pd.DataFrame, prev: pd.DataFrame | None, prev_month: str) -> None:
@@ -117,13 +117,15 @@ def render() -> None:
 
     _kpis(df, prev, prev_month)
 
+    ui.section("Calidad de las consultas")
     c1, c2 = st.columns(2)
     with c1:
         _distribucion_card(df, month)
     with c2:
         _area_card(df, month)
 
-    zones_card("zonas_consultas", "Consultas por provincia", df["Zona"],
+    ui.section("Origen de las consultas")
+    zones_card("zonas_consultas", "Por provincia", df["Zona"],
                "consultas", f"provincias_consultas_{month}")
 
     cols = ["Fecha", "Nombre", "Numero", "Zona", "Area de interes", "Negocio",

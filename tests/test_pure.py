@@ -177,3 +177,26 @@ def test_province_map_only_active_provinces():
 def test_geojson_has_all_provinces():
     names = {f["id"] for f in geo.load_provinces()["features"]}
     assert len(names) == 23 and {"Buenos Aires", "Tierra del Fuego", "Córdoba"} <= names
+
+
+# --- fuentes ------------------------------------------------------------------
+@pytest.mark.parametrize("raw, canon", [
+    ("Email", "Correo"), ("correo electrónico", "Correo"), ("WhatsApp", "WhatsApp"),
+    ("Recomendación", "Por Recomendación"), ("Sitio web", "Sitio Web"),
+    ("Redes sociales", "RRSS"), ("Derivación de otra área", "Derivación de otra area"),
+    ("CLIENTE EXISTENTE", "Cliente existente"), ("", "Sin fuente"), (None, "Sin fuente"),
+    ("Feria", "Feria"), ("OTROS", "Otro"), ("Casa Matriz", "Casa matriz"),
+    ("impulso de ventas", "Impulso de venta"),
+])
+def test_canonical_source(raw, canon):
+    from utils.branding import canonical_source
+    assert canonical_source(raw) == canon
+
+
+def test_source_colors_static():
+    from utils.branding import SOURCE_ORDER, SOURCE_COLORS, source_color, COTEAR_GRAY
+    assert set(SOURCE_ORDER) == set(SOURCE_COLORS)
+    assert len(set(SOURCE_COLORS.values())) == len(SOURCE_COLORS)
+    assert source_color("Otra cosa") == COTEAR_GRAY
+    assert source_color("Sin fuente") == COTEAR_GRAY
+    assert COTEAR_GRAY not in SOURCE_COLORS.values()
