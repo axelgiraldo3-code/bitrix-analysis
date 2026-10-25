@@ -89,3 +89,17 @@ def daily_counts(dts: pd.Series, year_month: str,
     d = _as_datetime(dts).dropna().dt.date
     vc = d.value_counts()
     return days, [int(vc.get(day, 0)) for day in days]
+
+
+def weekday_counts(dts: pd.Series, year_month: str,
+                   today: Optional[date] = None) -> tuple[list[int], list[int]]:
+    """(consultas, cantidad de días) por día de la semana (0=lunes) en el mes.
+
+    La cantidad de días sirve para el promedio: un mes tiene 4 o 5 de cada
+    día, y en el mes en curso sólo se cuentan los días hasta hoy."""
+    days, counts = daily_counts(dts, year_month, today)
+    totals, n_days = [0] * 7, [0] * 7
+    for day, c in zip(days, counts):
+        totals[day.weekday()] += c
+        n_days[day.weekday()] += 1
+    return totals, n_days

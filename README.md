@@ -63,8 +63,8 @@ página abierta.
 
 - **Reporte mensual**: KPIs con variación contra el mes anterior (consultas,
   provincia y área principal, % sin interés real = sin respuestas + sin
-  interés), distribución por clasificación (torta ⇄ barras), área de interés ×
-  clasificación, mapa + ranking de provincias y datos crudos del mes.
+  interés), distribución por clasificación (torta ⇄ barras), área de interés
+  (barras sólidas por derivación interna ⇄ segmentadas por clasificación), mapa + ranking de provincias y datos crudos del mes.
 - **Negocios Bitrix24**: período libre (mes, trimestre, año, rango). Sólo
   cuenta los negocios **creados** dentro del período (con su etapa actual). Los
   KPIs se comparan con el período anterior de igual duración (mes, trimestre o

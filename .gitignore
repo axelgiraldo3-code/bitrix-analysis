@@ -26,3 +26,6 @@ data/first_deal.json
 data/stages_map.json
 data/deal_*.json
 data/userfields*.json
+
+# Instrucciones locales para Claude Code
+CLAUDE.md
