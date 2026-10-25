@@ -151,6 +151,3 @@ def motivo_color(name: str) -> str:
     digest = int(hashlib.md5(key.encode("utf-8")).hexdigest(), 16)
     return _MOTIVO_SPARE[digest % len(_MOTIVO_SPARE)]
 
-
-# Acento lateral de los KPI de Negocios: fila "Volumen" (azul) y "Resultado"
-KPI_ACCENT_RESULT = "#39A8EF"

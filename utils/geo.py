@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 
+from .charts import pct_label
 from .phone_ar import ZONE_FOREIGN, ZONE_UNKNOWN
 
 OTHERS = "Otros"
@@ -110,9 +111,9 @@ def province_map(counts: pd.DataFrame, total: int, unit: str = "consultas",
         colorscale=MAP_COLORSCALE,
         marker_line_color="white",
         marker_line_width=1,
-        customdata=data["pct"].round(1),
+        customdata=[pct_label(v) for v in data["pct"]],
         hovertemplate=(f"<b>%{{location}}</b><br>%{{z}} {unit}"
-                       "<br>%{customdata}% del total<extra></extra>"),
+                       "<br>%{customdata} del total<extra></extra>"),
         colorbar=dict(title=dict(text=unit.capitalize()), thickness=12, len=0.6,
                       tickformat="d", nticks=min(int(vmax) + 1, 6)),
     ))
@@ -125,7 +126,7 @@ def province_map(counts: pd.DataFrame, total: int, unit: str = "consultas",
     fig.add_trace(go.Scattergeo(
         lon=[p[0] for p in pts],
         lat=[p[1] for p in pts],
-        text=[f"{v:.1f}%" for v in data["pct"]],
+        text=[pct_label(v) for v in data["pct"]],
         mode="text",
         textfont=dict(size=12, color=text_colors, family="sans-serif"),
         hoverinfo="skip",
@@ -153,5 +154,5 @@ def outside_map_note(counts: pd.DataFrame, total: int, unit: str = "consultas") 
         n = int(counts.loc[counts["Zona"] == zone, "Cantidad"].sum())
         if n and total:
             label = unit if n != 1 else unit.rstrip("s")
-            parts.append(f"{zone}: {n} {label} ({n / total * 100:.1f} %)")
+            parts.append(f"{zone}: {n} {label} ({pct_label(n / total * 100)})")
     return " · ".join(parts)

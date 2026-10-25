@@ -57,12 +57,12 @@ def _body(month_df: pd.DataFrame) -> None:
                     "Nombre": row["Nombre"],
                     "Clasificacion interna": new_class,
                 })
-                st.toast(f"En cola: {row['Numero']} → {new_class}", icon="📥")
+                st.toast(f"En cola: {row['Numero']} → {new_class}", icon=":material/inbox:")
                 st.rerun(scope="app")
 
         num_key = str(row["Numero"])
         if num_key in pending.get():
-            if st.button("Quitar de la cola", icon=":material/undo:", key=f"unqueue_{num_key}"):
+            if st.button("Quitar de la cola", key=f"unqueue_{num_key}"):
                 pending.remove([num_key])
                 st.rerun(scope="app")
 

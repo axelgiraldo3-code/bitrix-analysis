@@ -63,7 +63,7 @@ página abierta.
 
 - **Reporte mensual**: KPIs con variación contra el mes anterior (consultas,
   provincia y área principal, % sin interés real = sin respuestas + sin
-  interés), distribución por clasificación (torta ⇄ barras), área de interés
+  interés), distribución por clasificación (barras ⇄ torta), área de interés
   (barras sólidas por derivación interna ⇄ segmentadas por clasificación), mapa + ranking de provincias y datos crudos del mes.
 - **Negocios Bitrix24**: período libre (mes, trimestre, año, rango). Sólo
   cuenta los negocios **creados** dentro del período (con su etapa actual). Los
@@ -80,12 +80,16 @@ página abierta.
   sin controles de zoom y un ícono para descargar en PNG. El mapa de
   provincias usa Plotly sin barra de herramientas (ECharts nativo no admite
   contornos propios).
+- Tarjetas blancas con borde suave y esquinas de 8 px, sin sombra ni acentos
+  de color. Sin emojis: íconos Material sólo en las acciones principales.
+- Números con coma decimal ("14,3 %") en gráficos, mapa y KPIs; las tablas
+  conservan el punto para seguir siendo ordenables.
 - Cada tarjeta tiene el botón Gráfico ⇄ Datos: el gráfico se desliza y aparece
   la tabla. Es sólo CSS (`on_change="ignore"`), no vuelve a ejecutar la app.
   Cambiar el tipo de gráfico re-ejecuta sólo esa tarjeta (`st.fragment`).
 - KPIs: verde/rojo según la polaridad del indicador. Indicadores negativos
-  (bajar es bueno): % sin interés real, motivo de baja más frecuente y vida de
-  negocio. "En curso" se informa en gris.
+  (bajar es bueno): % sin interés real y motivo de baja más frecuente. "En
+  curso" y "Vida de negocio" son neutros y se informan en gris.
 - Datos crudos al final, en un desplegable con su botón de descarga (CSV UTF-8
   con BOM).
 

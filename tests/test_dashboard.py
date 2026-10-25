@@ -41,7 +41,7 @@ def test_delta_positive_indicator():
 
 def test_delta_negative_indicator_is_inverse():
     kw = kpis.delta_kwargs(27.5, 30.1, kpis.DOWN_GOOD, unit=" p.p.", decimals=1)
-    assert kw["delta"] == "-2.6 p.p." and kw["delta_color"] == "inverse"
+    assert kw["delta"] == "-2,6 p.p." and kw["delta_color"] == "inverse"
 
 
 def test_delta_zero_and_missing_previous():
