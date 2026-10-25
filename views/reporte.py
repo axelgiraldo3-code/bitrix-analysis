@@ -32,17 +32,17 @@ def _distribucion_card(df: pd.DataFrame, month: str) -> None:
     filename = f"clasificaciones_{month}"
 
     def controls():
-        st.segmented_control("Tipo", [TYPE_PIE, TYPE_BAR], default=TYPE_PIE, required=True,
+        st.segmented_control("Tipo", [TYPE_BAR, TYPE_PIE], default=TYPE_BAR, required=True,
                              key="tipo_clasificacion", label_visibility="collapsed",
                              persist_state="session")
 
     def chart():
         names, values = counts["Clasificación"].tolist(), counts["Cantidad"].tolist()
-        if st.session_state.get("tipo_clasificacion", TYPE_PIE) == TYPE_BAR:
-            opt = charts.hbar(names, values, colors, filename, label_width=170)
-        else:
+        if st.session_state.get("tipo_clasificacion", TYPE_BAR) == TYPE_PIE:
             opt = charts.donut(names, values, colors, filename, width=480, height=400,
                                label_width=170)
+        else:
+            opt = charts.hbar(names, values, colors, filename, label_width=170)
         ui.echart(opt, height=400)
 
     def table():
@@ -147,12 +147,11 @@ def _kpis(df: pd.DataFrame, prev: pd.DataFrame | None, prev_month: str,
            months=months)
     ui.kpi(k2, "Provincia con más consultas", zona, zona_kw, trend=trend.get("zona"), months=months)
     ui.kpi(k3, "Área de interés principal", area, area_kw, trend=trend.get("area"), months=months)
-    ui.kpi(k4, "Sin interés real", f"{sin:.1f} %",
+    ui.kpi(k4, "Sin interés real", charts.pct_label(sin),
            kpis.delta_kwargs(sin, pct_sin_interes(prev), kpis.DOWN_GOOD,
                              vs=vs, unit=" p.p.", decimals=1),
            trend=trend.get("sin"), months=months, unit=" %",
-           help="% de consultas clasificadas SIN RESPUESTAS o SIN INTERES. "
-                "Es un indicador negativo: bajar es bueno.")
+           help="% de consultas clasificadas SIN RESPUESTAS o SIN INTERES.")
 
 
 def _por_dia_card(df: pd.DataFrame, month: str) -> None:

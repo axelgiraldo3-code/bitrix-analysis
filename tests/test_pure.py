@@ -170,8 +170,8 @@ def test_province_map_only_active_provinces():
     fig = geo.province_map(counts, len(zones))
     choro, labels = fig.data
     assert sorted(choro.locations) == ["Buenos Aires", "Córdoba"]
-    assert sorted(labels.text) == ["30.0%", "50.0%"]
-    assert "Extranjero: 2" in geo.outside_map_note(counts, len(zones))
+    assert sorted(labels.text) == ["30,0 %", "50,0 %"]
+    assert "Extranjero: 2 consultas (20,0 %)" in geo.outside_map_note(counts, len(zones))
 
 
 def test_geojson_has_all_provinces():
@@ -226,7 +226,7 @@ def test_donut_equal_values_same_percent():
     opt = charts.donut(["a", "b", "c", "d", "e", "f", "g"], [3, 1, 1, 1, 1, 0, 0],
                        ["#01498E"] * 7, "x")
     labels = [d["label"]["formatter"] for d in opt["series"][0]["data"]]
-    assert labels[1] == labels[2] == labels[3] == labels[4] == "14.3%"
+    assert labels[1] == labels[2] == labels[3] == labels[4] == "14,3 %"
     json.dumps(opt)
 
 
@@ -235,7 +235,24 @@ def test_funnel_keeps_order_and_percent_of_first():
     opt = charts.funnel(["A", "B"], [10, 4], ["#01498E", "#11734B"], "x")
     s = opt["series"][0]
     assert s["sort"] == "none"
-    assert "40.0%" in s["data"][1]["label"]["formatter"]
+    assert "40,0 %" in s["data"][1]["label"]["formatter"]
+
+
+def test_fmt_dec_uses_decimal_comma():
+    from utils import charts
+    assert charts.fmt_dec(14.26) == "14,3"
+    assert charts.fmt_dec(3) == "3,0"
+    assert charts.pct_label(52.5) == "52,5 %"
+
+
+def test_stacked_bars_percent_labels_with_comma():
+    from utils import charts
+    opt = charts.stacked_bars(["Torno"], [("A", [33.33], "#01498E"), ("B", [66.67], "#11734B")],
+                              "x", percent=True)
+    item = opt["series"][0]["data"][0]
+    assert item["label"]["formatter"] == "33,3 %"
+    assert item["tooltip"]["formatter"] == "Torno<br/>A: 33,3 %"
+    assert opt["tooltip"]["trigger"] == "item"
 
 def test_heatmap_zero_cells_blank_and_tooltips():
     from utils import charts
@@ -326,10 +343,11 @@ def test_semester_bounds_and_previous():
 def test_sparkline_smooth_tooltip_and_gaps():
     import json
     from utils import charts
-    opt = charts.sparkline(["May", "Jun"], [None, 72], "#21C354")
+    opt = charts.sparkline(["May", "Jun", "Jul"], [None, 72, 52.5], "#21C354", unit=" %")
     s = opt["series"][0]
-    assert s["smooth"] and s["data"] == ["-", 72]
-    assert opt["tooltip"]["formatter"] == "{b} - {c}"
+    assert s["smooth"] and s["data"] == ["-", 72, 52.5]
+    assert opt["tooltip"]["formatter"] == "{b}"
+    assert opt["xAxis"]["data"] == ["May - sin datos", "Jun - 72 %", "Jul - 52,5 %"]
     assert "toolbox" not in opt
     json.dumps(opt)
 

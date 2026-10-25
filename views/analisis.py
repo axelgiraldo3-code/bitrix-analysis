@@ -37,17 +37,18 @@ def _embudo_card(counts: list[int], month: str) -> None:
                                             for p, c in zip(counts, counts[1:])],
     })
 
-    def chart():
-        ui.echart(charts.funnel(funnel.STAGES, counts, FUNNEL_COLORS, f"embudo_{month}"),
-                  height=420)
-
-    def table():
-        st.dataframe(table_df, hide_index=True, width="stretch", column_config={
-            "% de las consultas": st.column_config.NumberColumn(format="%.1f %%"),
-            "% de la etapa anterior": st.column_config.NumberColumn(format="%.1f %%"),
-        })
-
-    ui.chart_card("embudo", "Embudo de consultas", chart, table)
+    # Mientras sea la única tarjeta de la sección, gráfico y tabla van lado a
+    # lado (sin Gráfico ⇄ Datos) para que el embudo no ocupe todo el ancho.
+    with ui.card("embudo", "Embudo de consultas"):
+        c_chart, c_table = st.columns([3, 2], vertical_alignment="center")
+        with c_chart:
+            ui.echart(charts.funnel(funnel.STAGES, counts, FUNNEL_COLORS, f"embudo_{month}"),
+                      height=420)
+        with c_table:
+            st.dataframe(table_df, hide_index=True, width="stretch", column_config={
+                "% de las consultas": st.column_config.NumberColumn(format="%.1f %%"),
+                "% de la etapa anterior": st.column_config.NumberColumn(format="%.1f %%"),
+            })
 
 
 def render() -> None:

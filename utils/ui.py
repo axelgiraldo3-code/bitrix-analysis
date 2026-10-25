@@ -16,7 +16,7 @@ import pandas as pd
 import streamlit as st
 
 from . import charts, periods
-from .branding import COTEAR_BLUE, KPI_ACCENT_RESULT
+from .branding import COTEAR_BLUE
 
 CSV_ENCODING = "utf-8-sig"  # BOM: Excel en español muestra bien las tildes
 
@@ -59,7 +59,6 @@ def inject_css() -> None:
         --ct-muted: #6B7785;
         --ct-line: #E3E8EE;
         --ct-card: #FFFFFF;
-        --ct-shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 2px 8px rgba(16, 24, 40, .06);
       }}
 
       /* Encabezado de página */
@@ -67,15 +66,14 @@ def inject_css() -> None:
         color: var(--ct-blue); font-size: 1.125rem; font-weight: 700;
         letter-spacing: .08em; text-transform: uppercase; margin-bottom: .1rem;
       }}
-      body .stApp h1 {{ color: var(--ct-text); font-weight: 800; letter-spacing: -.01em; }}
+      body .stApp h1 {{ color: var(--ct-text); font-weight: 700; }}
       .ct-subtitle {{ color: var(--ct-muted); font-size: .95rem; margin-top: -.35rem; }}
 
       /* Tarjetas (st.container con key "card_*") */
       div[class*="st-key-card_"] {{
         background: var(--ct-card);
         border: 1px solid var(--ct-line) !important;
-        border-radius: 14px !important;
-        box-shadow: var(--ct-shadow);
+        border-radius: 8px !important;
         padding: 1rem 1.15rem .9rem 1.15rem;
       }}
       /* Tarjetas lado a lado: todas las de la fila con el mismo alto */
@@ -96,21 +94,15 @@ def inject_css() -> None:
       .ct-section-sub {{ font-size: .8rem; color: var(--ct-muted); margin: .1rem 0 0 .1rem; }}
       div[class*="st-key-cardctl_"] {{ flex-shrink: 0; }}
 
-      /* KPIs: tarjeta blanca con acento lateral azul. La tarjeta es la
-         columna completa (indicador + mini línea de tendencia), así todas
-         las de una fila tienen el mismo alto. */
+      /* KPIs: tarjeta blanca. La tarjeta es la columna completa (indicador +
+         mini línea de tendencia), así todas las de una fila tienen el mismo alto. */
       div[class*="st-key-kpis_"] div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"] {{
         background: var(--ct-card);
         border: 1px solid var(--ct-line);
-        border-left: 4px solid var(--ct-blue);
-        border-radius: 12px;
-        box-shadow: var(--ct-shadow);
+        border-radius: 8px;
         padding: .85rem 1rem .55rem 1rem;
         min-height: 150px; height: 100%;
         justify-content: space-between; gap: .25rem;
-      }}
-      div[class*="st-key-kpis_resultado"] div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"] {{
-        border-left-color: {KPI_ACCENT_RESULT};
       }}
       div[data-testid="stMetric"] {{ background: transparent; padding: 0; }}
       /* Sin la barra de Streamlit (descargar / pantalla completa) en la mini línea */
@@ -132,7 +124,7 @@ def inject_css() -> None:
       /* Desplegables (datos crudos) como tarjeta */
       div[data-testid="stExpander"] details {{
         background: var(--ct-card); border: 1px solid var(--ct-line);
-        border-radius: 14px; box-shadow: var(--ct-shadow);
+        border-radius: 8px;
       }}
       div[data-testid="stExpander"] summary p {{ font-weight: 700; }}
 

@@ -49,14 +49,19 @@ def label_color(fill: str) -> str:
         else DARK_LABEL
 
 
+def fmt_dec(v: float, decimals: int = 1) -> str:
+    """Número con coma decimal: 14.25 → '14,3'."""
+    return f"{float(v):.{decimals}f}".replace(".", ",")
+
+
 def pct_label(p: float) -> str:
-    """Porcentaje con 1 decimal y coma decimal no: '14.3%'."""
-    return f"{p:.1f}%"
+    """Porcentaje con 1 decimal, coma decimal y espacio: '14,3 %'."""
+    return f"{fmt_dec(p)} %"
 
 
 def _num(v) -> str:
     v = float(v)
-    return str(int(v)) if v.is_integer() else f"{v:.1f}"
+    return str(int(v)) if v.is_integer() else fmt_dec(v)
 
 
 def series_color(i: int) -> str:
@@ -109,7 +114,7 @@ def _value_axis(name: str = "", percent: bool = False) -> dict:
     axis = {"type": "value", "name": name, "nameTextStyle": {"color": MUTED},
             "axisLabel": {"color": MUTED}, "splitLine": {"lineStyle": {"color": GRID}}}
     if percent:
-        axis.update(max=100, axisLabel={"color": MUTED, "formatter": "{value}%"})
+        axis.update(max=100, axisLabel={"color": MUTED, "formatter": "{value} %"})
     return axis
 
 
@@ -147,7 +152,7 @@ def donut(names: Sequence[str], values: Sequence[float], colors: Sequence[str],
                                      "overflow": "truncate"},
                           tooltip={"show": True}),
         "series": [{
-            "type": "pie", "radius": [int(radius * 0.58), radius],
+            "type": "pie", "radius": [int(radius * 0.39), radius],
             "center": ["50%", 18 + free_h // 2],
             "avoidLabelOverlap": True,
             "itemStyle": {"borderColor": "#FFFFFF", "borderWidth": 1},
@@ -189,7 +194,9 @@ def stacked_bars(categories: Sequence[str], series: Sequence[tuple[str, Sequence
                  filename: str, *, y_name: str = "", percent: bool = False,
                  rotate: int = 0, width: int = 720, label_width: int = 110) -> dict:
     """Columnas apiladas. ``series`` = [(nombre, valores, color), ...].
-    Los segmentos en 0 no muestran etiqueta."""
+    Los segmentos en 0 no muestran etiqueta. En porcentaje, etiquetas y
+    tooltip van armados por segmento ("33,3 %"): las plantillas de ECharts
+    no admiten coma decimal."""
     # Altura de la columna más alta: los segmentos muy finos (< 4 % de esa
     # altura) no muestran etiqueta porque no entra; el valor sigue en el tooltip.
     stack_max = max((sum(float(vals[i]) for _, vals, _ in series)
@@ -199,23 +206,29 @@ def stacked_bars(categories: Sequence[str], series: Sequence[tuple[str, Sequence
     for name, values, color in series:
         txt = label_color(color)
         data = []
-        for v in values:
+        for cat, v in zip(categories, values):
             v = round(float(v), 1)
             item: dict = {"value": v}
             if v == 0 or v < min_label:
                 item["label"] = {"show": False}
+            elif percent:
+                item["label"] = {"formatter": pct_label(v)}
+            if percent:
+                item["tooltip"] = {"formatter": f"{html.escape(str(cat))}<br/>"
+                                              f"{html.escape(str(name))}: {pct_label(v)}"}
             data.append(item)
         out_series.append({
             "name": name, "type": "bar", "stack": "total", "barMaxWidth": 56,
             "itemStyle": {"color": color},
-            "label": {"show": True, "color": txt, "fontSize": 11,
-                      "formatter": "{c}%" if percent else "{c}"},
+            "label": {"show": True, "color": txt, "fontSize": 11, "formatter": "{c}"},
             "emphasis": {"focus": "series"},
             "data": data,
         })
+    tooltip = {"trigger": "item", "confine": True} if percent else \
+        {"trigger": "axis", "confine": True, "axisPointer": {"type": "shadow"}}
     return {
         **_base(filename),
-        "tooltip": {"trigger": "axis", "confine": True, "axisPointer": {"type": "shadow"}},
+        "tooltip": tooltip,
         "legend": _legend(type="plain", bottom=0, left="center"),
         "grid": {"left": 8, "right": 16, "top": 36, "containLabel": True,
                  "bottom": legend_rows([n for n, _, _ in series], width - 16) * 22 + 12},
@@ -350,16 +363,20 @@ SPARK_UP, SPARK_DOWN, SPARK_FLAT = "#21C354", "#FF4B4B", "#A3A8B4"
 
 def sparkline(labels: Sequence[str], values: Sequence, color: str, *, unit: str = "") -> dict:
     """Mini línea suavizada para un KPI, sin ejes ni descarga. Al pasar el
-    mouse: "Jun - 72". Los meses sin datos (None) quedan como hueco."""
+    mouse: "Jun - 72" / "Jun - 52,5 %". Los meses sin datos (None) quedan
+    como hueco. El texto del tooltip va en la categoría del eje (que no se
+    ve), porque la plantilla "{c}" mostraría el punto decimal."""
     data = ["-" if v is None else v for v in values]
+    tips = [f"{x} - sin datos" if v is None else f"{x} - {_num(v)}{unit}"
+            for x, v in zip(labels, values)]
     return {
         "animation": False,
         "grid": {"left": 4, "right": 4, "top": 6, "bottom": 4},
         "xAxis": {"type": "category", "show": False, "boundaryGap": False,
-                  "data": [str(x) for x in labels]},
+                  "data": tips},
         "yAxis": {"type": "value", "show": False, "scale": True},
         "tooltip": {"trigger": "axis", "confine": False, "appendToBody": True,
-                    "formatter": "{b} - {c}" + unit, "padding": [3, 8],
+                    "formatter": "{b}", "padding": [3, 8],
                     "textStyle": {"fontSize": 12, "color": TEXT},
                     "axisPointer": {"type": "line",
                                     "lineStyle": {"color": "#C9D1D9", "width": 1}}},

@@ -23,7 +23,8 @@ NO_PREVIOUS = "sin datos del período anterior"
 
 
 def _fmt_num(v: float, decimals: int) -> str:
-    return f"{v:+.{decimals}f}" if decimals else f"{int(round(v)):+d}"
+    """Con signo y coma decimal: '+3', '-2,6'."""
+    return f"{v:+.{decimals}f}".replace(".", ",") if decimals else f"{int(round(v)):+d}"
 
 
 def delta_kwargs(current: Optional[float], previous: Optional[float], polarity: str,

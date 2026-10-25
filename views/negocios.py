@@ -71,7 +71,7 @@ def _period_filter(months: list[str]):
         if start > end:
             sb.error("'Desde' no puede ser posterior a 'Hasta'.")
             return None
-    if sb.button("Recargar período desde API", icon=":material/sync:",
+    if sb.button("Recargar período desde API",
                  help="Fuerza traer todos los meses del período desde Bitrix24 "
                       "(ignora snapshots). Puede tardar si el período es largo.",
                  key="bitrix_period_refresh", width="stretch"):
@@ -129,7 +129,7 @@ def _kpis(cur: dict, prev: dict | None, vs: str, trend: dict[str, list]) -> None
                                          exclude=geo.NON_PROVINCE_ZONES)
     motivo, motivo_kw = kpis.category_kwargs(cur["motivo"], prev["motivo"] if prev else None,
                                              kpis.DOWN_GOOD, "casos")
-    vida_txt = f"{cur['vida']:.1f} días" if cur["vida"] is not None else "—"
+    vida_txt = f"{charts.fmt_dec(cur['vida'])} días" if cur["vida"] is not None else "—"
     months = trend.get("_months")
 
     def t(key):
@@ -145,8 +145,7 @@ def _kpis(cur: dict, prev: dict | None, vs: str, trend: dict[str, list]) -> None
     ui.kpi(r2[0], "Negocios cerrados", cur["cerrados"], d("cerrados", kpis.UP_GOOD),
            **t("cerrados"))
     ui.kpi(r2[1], "Ganados", cur["ganados"], d("ganados", kpis.UP_GOOD), **t("ganados"))
-    ui.kpi(r2[2], "Motivo de baja más frecuente", motivo, motivo_kw, **t("motivo"),
-           help="Indicador negativo: que baje la cantidad de casos es bueno.")
+    ui.kpi(r2[2], "Motivo de baja más frecuente", motivo, motivo_kw, **t("motivo"))
     ui.kpi(r2[3], "Vida de negocio", vida_txt,
            d("vida", kpis.NEUTRAL, unit=" días", decimals=1), **t("vida"),
            help=(f"Días promedio entre la creación y el cierre (último movimiento) de "
@@ -359,10 +358,6 @@ def render() -> None:
                                                                  p_start, p_end)
     for w in warns:
         st.warning(w)
-
-    n_api = sum(1 for s in sources.values() if s == "api")
-    n_snap = sum(1 for s in sources.values() if s == "snapshot")
-    st.caption(f"{len(sources)} mes(es) leídos — {n_snap} desde snapshot, {n_api} desde API.")
 
     if b.empty:
         st.info("No hay negocios de Bitrix creados en este período.")
