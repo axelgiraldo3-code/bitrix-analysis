@@ -338,3 +338,16 @@ def test_timeseries_lines_are_smooth():
     from utils import charts
     opt = charts.timeseries(["a", "b"], [("x", [1, 2], "#000000")], "f")
     assert opt["series"][0]["smooth"]
+
+
+def test_weekday_counts():
+    from datetime import date, datetime
+    import pandas as pd
+    from utils.trends import weekday_counts
+    dts = pd.Series([datetime(2026, 9, 7, 10, 5), datetime(2026, 9, 14, 9, 0),
+                     datetime(2026, 9, 8, 23, 0), None])
+    totals, n_days = weekday_counts(dts, "2026-09", today=date(2026, 10, 1))
+    assert totals == [2, 1, 0, 0, 0, 0, 0]                   # 7 y 14-sep-26 son lunes
+    assert sum(n_days) == 30 and n_days[0] == 4 and n_days[1] == 5
+    _, n_days = weekday_counts(dts, "2026-10", today=date(2026, 10, 3))
+    assert sum(n_days) == 3                                  # mes en curso: hasta hoy
