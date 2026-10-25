@@ -16,9 +16,16 @@ from . import bitrix, cache, pending, periods, sheets
 from .machinery import classify_machinery
 from .phone_ar import province_of, significant_ar
 
+# Vigencia del snapshot de Bitrix de cada mes: el mes en curso y el anterior
+# todavía tienen negocios que se mueven; los más viejos casi no cambian (y
+# refrescarlos todos a la vez supera la cuota de Sheets en un período largo).
+# A pedido: "Recargar período desde API" / "Recargar Bitrix desde API".
 BITRIX_SNAPSHOT_TTL_DAYS = 7
+BITRIX_SNAPSHOT_TTL_OLD_DAYS = 30
 PHONE_INDEX_TTL_DAYS = 7
 BITRIX_MEMO_TTL_SEC = 600
+SHEETS_QUOTA_WARNING = ("Google Sheets limitó las lecturas por un momento (cuota por minuto). "
+                        "Algunos meses no se cargaron: reintentá en un minuto.")
 
 _FLAGS_KEY = "_run_flags"
 
@@ -49,7 +56,10 @@ def load_bot() -> pd.DataFrame:
 
 def _bitrix_snapshot_from_sheets(year_month: str) -> pd.DataFrame:
     """Reconstruye el DataFrame Bitrix desde la pestaña YYYY-MM_Bitrix."""
-    df = sheets.read_month_dataframe(year_month, "Bitrix")
+    return _prepare_snapshot(sheets.read_month_dataframe(year_month, "Bitrix"))
+
+
+def _prepare_snapshot(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = df.copy()
@@ -63,7 +73,8 @@ def _bitrix_snapshot_from_sheets(year_month: str) -> pd.DataFrame:
 def load_bitrix_month(year_month: str, force_refresh: bool = False) -> tuple[pd.DataFrame, str, str]:
     """(df, origen, aviso) para un mes. origen ∈ {'snapshot','api','error'}.
 
-    Snapshot-first con TTL de 7 días; force_refresh=True va siempre a la API.
+    Snapshot-first con vigencia según ``snapshot_ttl_days`` (7 o 30 días);
+    force_refresh=True va siempre a la API.
     El resultado se memoiza en la sesión (10 min). La escritura en Sheets
     ocurre acá, fuera de cualquier función cacheada.
     """
@@ -73,11 +84,15 @@ def load_bitrix_month(year_month: str, force_refresh: bool = False) -> tuple[pd.
         return hit["v"]
 
     result: tuple[pd.DataFrame, str, str]
-    snap_fresh = False
-    if not force_refresh:
-        last_sync = sheets.get_last_bitrix_sync(year_month)
-        snap_fresh = bool(last_sync and (datetime.now() - last_sync).days < BITRIX_SNAPSHOT_TTL_DAYS)
-    snap = _bitrix_snapshot_from_sheets(year_month) if snap_fresh else pd.DataFrame()
+    try:
+        snap_fresh = not force_refresh and _snapshot_fresh(year_month)
+        snap = _bitrix_snapshot_from_sheets(year_month) if snap_fresh else pd.DataFrame()
+    except Exception as e:
+        if not sheets.is_quota_error(e):
+            raise
+        # Sin cuota de Sheets no se va a la API de Bitrix (sería lento y
+        # tampoco se podría guardar). No se memoiza: el próximo intento relee.
+        return pd.DataFrame(columns=bitrix.DEAL_COLUMNS_OUT), "error", SHEETS_QUOTA_WARNING
     if not snap.empty:
         result = (snap, "snapshot", "")
     else:
@@ -91,7 +106,12 @@ def load_bitrix_month(year_month: str, force_refresh: bool = False) -> tuple[pd.
                 sheets.set_last_bitrix_sync(year_month)
             result = (df, "api", "")
         except Exception as e:
-            snap = _bitrix_snapshot_from_sheets(year_month)
+            try:
+                snap = _bitrix_snapshot_from_sheets(year_month)
+            except Exception as e2:
+                if not sheets.is_quota_error(e2):
+                    raise
+                snap = pd.DataFrame()
             if not snap.empty:
                 result = (snap, "snapshot", f"API de Bitrix falló ({e}). Usando snapshot vencido de {year_month}.")
             else:
@@ -101,15 +121,60 @@ def load_bitrix_month(year_month: str, force_refresh: bool = False) -> tuple[pd.
     return result
 
 
+def snapshot_ttl_days(year_month: str, today: datetime | None = None) -> int:
+    """Días de vigencia del snapshot de ``year_month``: 7 para el mes en curso
+    y el anterior, 30 para los más viejos."""
+    now = today or datetime.now()
+    recent = periods.shift_months(f"{now.year:04d}-{now.month:02d}", -1)
+    return BITRIX_SNAPSHOT_TTL_DAYS if year_month >= recent else BITRIX_SNAPSHOT_TTL_OLD_DAYS
+
+
+def _snapshot_fresh(year_month: str) -> bool:
+    last_sync = sheets.get_last_bitrix_sync(year_month)
+    return bool(last_sync and (datetime.now() - last_sync).days < snapshot_ttl_days(year_month))
+
+
+def _prefetch_snapshots(year_months: tuple[str, ...]) -> str:
+    """Lee en un solo pedido los snapshots vigentes de los meses que no están
+    en la memoria de la sesión y los deja ahí, para que ``load_bitrix_month``
+    no lea mes por mes (~3 lecturas de Sheets cada uno). Los meses sin
+    snapshot vigente quedan para ``load_bitrix_month`` (API de Bitrix).
+    Devuelve el aviso de cuota si Sheets la rechazó ("" si no)."""
+    memo = st.session_state.setdefault("_bitrix_memo", {})
+    now = time.time()
+    missing = [ym for ym in year_months
+               if not (ym in memo and now - memo[ym]["t"] < BITRIX_MEMO_TTL_SEC)]
+    if len(missing) < 2:
+        return ""
+    try:
+        fresh = tuple(ym for ym in missing if _snapshot_fresh(ym))
+        tabs = sheets.read_months_batch(fresh, "Bitrix") if fresh else {}
+    except Exception as e:
+        if sheets.is_quota_error(e):
+            return SHEETS_QUOTA_WARNING
+        raise
+    for ym, df in tabs.items():
+        if not df.empty:
+            memo[ym] = {"t": now, "v": (_prepare_snapshot(df), "snapshot", "")}
+    return ""
+
+
 def load_bitrix_period(year_months: tuple[str, ...], force_refresh: bool = False
                        ) -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     """Agrega varios meses de Bitrix y deduplica por 'ID negocio' quedándose
-    con la copia del mes más reciente (la más actualizada)."""
+    con la copia del mes más reciente (la más actualizada). Los snapshots se
+    leen en lote; si Sheets rechaza por cuota, esos meses quedan como error
+    con un único aviso (sin caerse)."""
     frames, sources, warns = [], {}, []
+    if not force_refresh:
+        quota = _prefetch_snapshots(year_months)
+        if quota:
+            return (pd.DataFrame(columns=bitrix.DEAL_COLUMNS_OUT),
+                    {ym: "error" for ym in year_months}, [quota])
     for ym in year_months:
         df, src, warn = load_bitrix_month(ym, force_refresh=force_refresh)
         sources[ym] = src
-        if warn:
+        if warn and warn not in warns:
             warns.append(warn)
         if not df.empty:
             frames.append(df)
