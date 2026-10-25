@@ -12,5 +12,5 @@ Sólo cuando el usuario lo pide y los cambios ya están probados.
 4. Agregar los archivos por nombre (no `git add -A`) y commitear con un mensaje claro en español, estilo `feat: barras por día de la semana en Reporte mensual`. Si hay grupos de cambios distintos, un commit por grupo.
 5. `git push -u origin <rama>`.
 6. `gh pr create` con título y una descripción breve de qué cambia y cómo se probó.
-7. `gh pr merge --squash --delete-branch`, volver a `main` y `git pull`.
+7. `gh pr merge --merge --delete-branch` (merge común: los commits por grupo se conservan en `main`), volver a `main` y `git pull`.
 8. Confirmar al usuario el link del PR y que Streamlit Cloud va a redeployar desde `main`.
