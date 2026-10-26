@@ -65,12 +65,16 @@ página abierta.
   provincia y área principal, % sin interés real = sin respuestas + sin
   interés), distribución por clasificación (barras ⇄ torta), área de interés
   (barras sólidas por derivación interna ⇄ segmentadas por clasificación), mapa + ranking de provincias y datos crudos del mes.
-- **Negocios Bitrix24**: período libre (mes, trimestre, año, rango). Sólo
-  cuenta los negocios **creados** dentro del período (con su etapa actual). Los
-  KPIs se comparan con el período anterior de igual duración (mes, trimestre o
-  año anterior; en un rango, los mismos días justo antes). Tipo de máquina ×
-  etapa (cantidad ⇄ %), motivos de baja (torta ⇄ barras), mapa + ranking de
-  provincias y lista de negocios (columna Tipo maquinaria oculta).
+- **Negocios Bitrix24**: período libre (mes, trimestre, año, rango). Dos
+  lecturas: por **creación** (los negocios creados dentro del período, con su
+  etapa actual) y por **cierre** (grupo "Cierres del período": los ganados o
+  perdidos dentro del período sin importar cuándo se crearon, el % que viene de
+  períodos anteriores y su vida promedio). Los KPIs se comparan con el período
+  anterior de igual duración (mes, trimestre o año anterior; en un rango, los
+  mismos días justo antes). Mes a mes con cerrados de los creados ese mes y
+  cerrados en el mes, tipo de máquina × etapa (cantidad ⇄ %), motivos de baja
+  (torta ⇄ barras), mapa + ranking de provincias, lista de negocios (columna
+  Tipo maquinaria oculta) y lista de cierres del período.
 - **Clasificación manual**: selección de un reporte y guardado en cola; el
   botón *Sincronizar* de la barra lateral lo escribe en Sheets.
 

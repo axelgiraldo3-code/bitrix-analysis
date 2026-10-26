@@ -12,7 +12,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from . import bitrix, cache, pending, periods, sheets
+from . import bitrix, cache, closures, pending, periods, sheets
 from .machinery import classify_machinery
 from .phone_ar import province_of, significant_ar
 
@@ -372,10 +372,11 @@ def bot_history(bot_raw: pd.DataFrame, year_month: str, current: pd.DataFrame,
 # -----------------------------------------------------------------------------
 # Negocios de un período
 # -----------------------------------------------------------------------------
-def deals_created_between(start, end, *, force_refresh: bool = False
-                          ) -> tuple[pd.DataFrame, dict[str, str], list[str]]:
-    """Negocios creados dentro de [start, end] (con su etapa actual), a partir
-    de los meses de Bitrix que cubren el período."""
+def deals_between(start, end, *, force_refresh: bool = False
+                  ) -> tuple[pd.DataFrame, dict[str, str], list[str]]:
+    """Negocios creados o movidos en los meses de Bitrix que cubren
+    [start, end], con fechas (``_cre_dt``, ``_mov_dt``) y zona. Sin filtrar:
+    ver ``deals_created_between`` y ``deals_closed_between``."""
     months = tuple(periods.year_months_spanning(start, end))
     df, sources, warns = load_bitrix_period(months, force_refresh=force_refresh)
     b = df.copy()
@@ -383,9 +384,35 @@ def deals_created_between(start, end, *, force_refresh: bool = False
         return b, sources, warns
     b["_mov_dt"] = pd.to_datetime(b["Fecha movimiento"], format="%d-%m-%y", errors="coerce")
     b["_cre_dt"] = pd.to_datetime(b["Fecha creacion"], format="%d-%m-%y", errors="coerce")
-    in_created = (b["_cre_dt"] >= pd.Timestamp(start)) & (b["_cre_dt"] <= pd.Timestamp(end))
-    b = b[in_created].sort_values("_mov_dt", ascending=False).copy()
     b["Zona"] = b["Telefono"].map(province_of)
     if "Etapa anterior" not in b.columns:
         b["Etapa anterior"] = ""
+    return b, sources, warns
+
+
+def _within(dates: pd.Series, start, end) -> pd.Series:
+    return (dates >= pd.Timestamp(start)) & (dates <= pd.Timestamp(end))
+
+
+def deals_created_between(start, end, *, force_refresh: bool = False
+                          ) -> tuple[pd.DataFrame, dict[str, str], list[str]]:
+    """Negocios creados dentro de [start, end] (con su etapa actual)."""
+    b, sources, warns = deals_between(start, end, force_refresh=force_refresh)
+    if b.empty:
+        return b, sources, warns
+    b = b[_within(b["_cre_dt"], start, end)].sort_values("_mov_dt", ascending=False).copy()
+    return b, sources, warns
+
+
+def deals_closed_between(start, end, *, force_refresh: bool = False
+                         ) -> tuple[pd.DataFrame, dict[str, str], list[str]]:
+    """Negocios cerrados (ganados o perdidos) dentro de [start, end], sin
+    importar cuándo se crearon. La fecha de cierre es el último movimiento
+    de etapa. Están en el snapshot del mes de cierre porque cada mes trae
+    los negocios creados o movidos en él."""
+    b, sources, warns = deals_between(start, end, force_refresh=force_refresh)
+    if b.empty:
+        return b, sources, warns
+    mask = closures.closed_mask(b) & _within(b["_mov_dt"], start, end)
+    b = b[mask].sort_values("_mov_dt", ascending=False).copy()
     return b, sources, warns

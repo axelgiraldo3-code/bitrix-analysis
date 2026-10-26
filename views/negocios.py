@@ -6,7 +6,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from utils import charts, data, geo, kpis, periods, trends, ui
+from utils import charts, closures, data, geo, kpis, periods, trends, ui
 from utils.branding import (BITRIX_STAGE_COLORS, BITRIX_STAGE_ORDER, COTEAR_BLUE,
                             COTEAR_GRAY, canonical_motivo, canonical_source, motivo_color,
                             source_color)
@@ -26,6 +26,13 @@ CHART_H = 500
 # Altura común de "por fuente" y "por provincia"
 BOTTOM_H = 380
 PERIOD_KINDS = ["Mes", "Trimestre", "Semestre", "Año", "Rango personalizado"]
+# Series de "Mes a mes": cerrados según la fecha de creación o la de cierre
+CLOSED_OF_CREATED = "Cerrados (de los creados ese mes)"
+CLOSED_IN_MONTH = "Cerrados en el mes"
+CLOSED_IN_COLOR = "#11734B"
+LISTING_COLS = ["Fecha movimiento", "Fecha creacion", "Nombre negocio", "Tipo maquinaria",
+                "Cliente", "Compania", "Etapa", "Etapa anterior", "Fuente",
+                "Motivo de baja", "Telefono", "Zona"]
 
 
 # ---------------------------------------------------------------------------
@@ -89,12 +96,10 @@ def _stats(b: pd.DataFrame | None) -> dict:
         return {"n": 0, "en_curso": 0, "cerrados": 0, "ganados": 0, "vida": None,
                 "n_vida": 0, "fuente": pd.Series(dtype=str), "zona": pd.Series(dtype=str),
                 "motivo": pd.Series(dtype=str)}
-    etapas = b["Etapa"].astype(str).str.strip().str.lower()
-    ganado = etapas.str.startswith("cerrado ganado")
-    perdido = etapas.str.startswith("cerrado perdido")
-    cerrado = ganado | perdido
-    vidas = (b.loc[cerrado, "_mov_dt"] - b.loc[cerrado, "_cre_dt"]).dt.days.dropna()
-    vidas = vidas[vidas >= 0]
+    cerrado = closures.closed_mask(b)
+    ganado = closures.won_mask(b)
+    perdido = cerrado & ~ganado
+    vidas = closures.lifetimes(b[cerrado])
     return {
         "n": len(b), "en_curso": int((~cerrado).sum()), "cerrados": int(cerrado.sum()),
         "ganados": int(ganado.sum()), "vida": float(vidas.mean()) if not vidas.empty else None,
@@ -115,6 +120,17 @@ def _trends(monthly: list[dict] | None, months: list[str] | None = None) -> dict
     out["fuente"] = trends.leader_trend([m["fuente"] for m in monthly])
     out["zona"] = trends.leader_trend([m["zona"] for m in monthly], geo.NON_PROVINCE_ZONES)
     out["motivo"] = trends.leader_trend([m["motivo"] for m in monthly])
+    return out
+
+
+def _closure_trends(monthly: list[dict] | None, months: list[str] | None) -> dict[str, list]:
+    """Mini líneas de los KPI de cierres (un valor por mes, el último es el actual)."""
+    if not monthly:
+        return {}
+    out = {k: [m[k] for m in monthly] for k in ("cerrados", "ganados")}
+    out["_months"] = list(months or [])
+    for k in ("arrastre", "vida"):
+        out[k] = [round(m[k], 1) if m[k] is not None else None for m in monthly]
     return out
 
 
@@ -149,28 +165,59 @@ def _kpis(cur: dict, prev: dict | None, vs: str, trend: dict[str, list]) -> None
     ui.kpi(r2[3], "Vida de negocio", vida_txt,
            d("vida", kpis.NEUTRAL, unit=" días", decimals=1), **t("vida"),
            help=(f"Días promedio entre la creación y el cierre (último movimiento) de "
-                 f"los {cur['n_vida']} negocios cerrados del período, ganados y perdidos.")
+                 f"los {cur['n_vida']} negocios cerrados del período, ganados y perdidos; "
+                 f"solo los creados y cerrados dentro del período.")
            if cur["vida"] is not None else "Sin negocios cerrados con fechas válidas")
+
+
+def _kpis_cierres(cur: dict, prev: dict | None, vs: str, trend: dict[str, list]) -> None:
+    """Negocios cerrados dentro del período, sin importar cuándo se crearon."""
+    def d(key, polarity, **kw):
+        return kpis.delta_kwargs(cur[key], prev[key] if prev else None, polarity, vs=vs, **kw)
+
+    def t(key, unit=""):
+        return {"trend": trend.get(key), "months": trend.get("_months"), "unit": unit}
+
+    arrastre_txt = charts.pct_label(cur["arrastre"]) if cur["arrastre"] is not None else "—"
+    vida_txt = f"{charts.fmt_dec(cur['vida'])} días" if cur["vida"] is not None else "—"
+    r = ui.kpi_row("cierres")
+    ui.kpi(r[0], "Cerrados en el período", cur["cerrados"], d("cerrados", kpis.UP_GOOD),
+           help="Negocios ganados o perdidos dentro del período, sin importar cuándo se "
+                "crearon.", **t("cerrados"))
+    ui.kpi(r[1], "Ganados en el período", cur["ganados"], d("ganados", kpis.UP_GOOD),
+           help="Negocios que pasaron a Cerrado Ganado dentro del período, sin importar "
+                "cuándo se crearon.", **t("ganados"))
+    ui.kpi(r[2], "De períodos anteriores", arrastre_txt,
+           d("arrastre", kpis.NEUTRAL, unit=" p.p.", decimals=1),
+           help="% de los cierres del período que se crearon antes de que empezara.",
+           **t("arrastre", " %"))
+    ui.kpi(r[3], "Vida de los cierres", vida_txt,
+           d("vida", kpis.NEUTRAL, unit=" días", decimals=1),
+           help="Días promedio entre la creación y el cierre de los negocios cerrados en "
+                "el período.", **t("vida"))
 
 
 # ---------------------------------------------------------------------------
 # Tarjetas
 # ---------------------------------------------------------------------------
 @st.fragment
-def _evolucion_card(b: pd.DataFrame, months: list[str], label: str) -> None:
-    """Negocios creados y cerrados en cada mes del período (cerrados: de los
-    negocios creados ese mes, como en los KPI)."""
+def _evolucion_card(b: pd.DataFrame, closed_b: pd.DataFrame, months: list[str],
+                    label: str) -> None:
+    """Negocios creados y cerrados en cada mes del período. Dos lecturas de
+    cerrados: de los creados ese mes (como en los KPI de Resultado) y en el
+    mes, sin importar cuándo se crearon (como en Cierres del período)."""
     created = trends.by_month(b["_cre_dt"], months)
-    etapas = b["Etapa"].astype(str).str.strip().str.lower()
-    closed_mask = etapas.str.startswith("cerrado")
-    closed = trends.by_month(b.loc[closed_mask, "_cre_dt"], months)
+    closed = trends.by_month(b.loc[closures.closed_mask(b), "_cre_dt"], months)
+    closed_in = trends.by_month(closed_b["_mov_dt"], months) if not closed_b.empty \
+        else [0] * len(months)
     # Fuente destacada del período (la del KPI) y cuántos negocios trajo cada mes
     top_src, _ = kpis.top_category(b["Fuente"])
     top_label = f"Fuente destacada: {top_src}"
     by_src = trends.by_month(b.loc[b["Fuente"] == top_src, "_cre_dt"], months)
     cats = [periods.month_label(m) for m in months]
     table_df = pd.DataFrame({"Mes": cats, "Negocios del período": created,
-                             "Cerrados": closed, top_label: by_src})
+                             CLOSED_OF_CREATED: closed, CLOSED_IN_MONTH: closed_in,
+                             top_label: by_src})
 
     def controls():
         st.segmented_control("Tipo", [TYPE_LINE, TYPE_COLS], default=TYPE_LINE,
@@ -181,7 +228,8 @@ def _evolucion_card(b: pd.DataFrame, months: list[str], label: str) -> None:
         kind = "bar" if st.session_state.get("tipo_evolucion", TYPE_LINE) == TYPE_COLS \
             else "line"
         series = [("Negocios del período", created, COTEAR_BLUE),
-                  ("Cerrados", closed, COTEAR_GRAY)]
+                  (CLOSED_OF_CREATED, closed, COTEAR_GRAY),
+                  (CLOSED_IN_MONTH, closed_in, CLOSED_IN_COLOR)]
         if top_src != "—":
             series.append((top_label, by_src, source_color(top_src), "dashed"))
         ui.echart(charts.timeseries(cats, series,
@@ -302,35 +350,55 @@ def _fuentes_card(b: pd.DataFrame, label: str) -> None:
 # ---------------------------------------------------------------------------
 # Carga
 # ---------------------------------------------------------------------------
-def _load(kind: str, start, end, p_start, p_end):
-    """(negocios del período, del período anterior o None, KPIs por mes para
-    la tendencia o None, sus meses o None, orígenes de lectura, avisos).
+def _by_month(df: pd.DataFrame, col: str, months: list[str]) -> dict[str, pd.DataFrame]:
+    return {m: (df[df[col].map(trends.month_key) == m] if not df.empty else df)
+            for m in months}
+
+
+def _load(kind: str, start, end, p_start, p_end) -> dict:
+    """Negocios del período y del anterior, por creación (``b``, ``prev_b``)
+    y por cierre (``closed``, ``prev_closed``); KPIs por mes para las mini
+    líneas (``monthly``, ``closed_monthly``, ``months``), orígenes de
+    lectura y avisos. Un período anterior sin lectura posible queda en None.
 
     En "Mes" se leen los últimos 6 meses de una vez: el anterior y la
     tendencia salen de ahí. En los demás períodos no hay mini línea (la
-    evolución se ve en la tarjeta "Mes a mes")."""
+    evolución se ve en la tarjeta "Mes a mes"). Las lecturas de cada mes
+    están memoizadas, así que creación y cierre no duplican pedidos."""
     force = data.flag("_force_period")
     b, sources, warns = data.deals_created_between(start, end, force_refresh=force)
+    closed, _, _ = data.deals_closed_between(start, end)
+    out = {"b": _canonicalize(b), "closed": _canonicalize(closed), "monthly": None,
+           "closed_monthly": None, "months": None}
     if kind != "Mes":
         prev_b, prev_sources, prev_warns = data.deals_created_between(p_start, p_end)
         prev_ok = any(src != "error" for src in prev_sources.values())
-        return (_canonicalize(b), _canonicalize(prev_b) if prev_ok else None, None, None,
-                sources, warns + prev_warns)
+        prev_closed, _, _ = data.deals_closed_between(p_start, p_end)
+        out.update(prev_b=_canonicalize(prev_b) if prev_ok else None,
+                   prev_closed=_canonicalize(prev_closed) if prev_ok else None,
+                   sources=sources, warns=warns + prev_warns)
+        return out
 
     ym = f"{start.year:04d}-{start.month:02d}"
     months = [periods.shift_months(ym, -i) for i in range(data.TREND_MONTHS - 1, -1, -1)]
     h_start = periods.month_bounds(months[0])[0]
     hist, h_sources, h_warns = data.deals_created_between(h_start, end)
-    hist = _canonicalize(hist)
-    by_m = {m: (hist[hist["_cre_dt"].map(trends.month_key) == m] if not hist.empty
-                else hist) for m in months}
+    hist_closed, _, _ = data.deals_closed_between(h_start, end)
+    by_m = _by_month(_canonicalize(hist), "_cre_dt", months)
+    closed_by_m = _by_month(_canonicalize(hist_closed), "_mov_dt", months)
     # Un mes sin lectura posible no tiene datos (no "0 negocios")
-    monthly = [_stats(by_m[m]) if h_sources.get(m) != "error" else None for m in months]
+    ok = {m: h_sources.get(m) != "error" for m in months}
     prev_ym = months[-2]
-    prev_b = by_m[prev_ym] if h_sources.get(prev_ym) != "error" else None
-    trend = [m if m is not None else _stats(None) for m in monthly]
-    return (_canonicalize(b), prev_b, trend, months, {**h_sources, **sources},
-            warns + [w for w in h_warns if w not in warns])
+    out.update(
+        prev_b=by_m[prev_ym] if ok[prev_ym] else None,
+        prev_closed=closed_by_m[prev_ym] if ok[prev_ym] else None,
+        monthly=[_stats(by_m[m] if ok[m] else None) for m in months],
+        closed_monthly=[closures.closure_stats(closed_by_m[m] if ok[m] else None,
+                                               periods.month_bounds(m)[0]) for m in months],
+        months=months, sources={**h_sources, **sources},
+        warns=warns + [w for w in h_warns if w not in warns],
+    )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -354,24 +422,33 @@ def render() -> None:
                    f"{prev_label[0].lower() + prev_label[1:] if kind == 'Mes' else prev_label}")
 
     with st.spinner("Cargando negocios de Bitrix…"):
-        b, prev_b, monthly, trend_months, sources, warns = _load(kind, start, end,
-                                                                 p_start, p_end)
-    for w in warns:
+        ld = _load(kind, start, end, p_start, p_end)
+    for w in ld["warns"]:
         st.warning(w)
+    b, prev_b, closed, prev_closed = ld["b"], ld["prev_b"], ld["closed"], ld["prev_closed"]
+    vs = f"vs. {prev_short}"
 
     if b.empty:
         st.info("No hay negocios de Bitrix creados en este período.")
-        return
+    else:
+        _kpis(_stats(b), _stats(prev_b) if prev_b is not None else None, vs,
+              _trends(ld["monthly"], ld["months"]))
 
-    _kpis(_stats(b), _stats(prev_b) if prev_b is not None else None, f"vs. {prev_short}",
-          _trends(monthly, trend_months))
+    ui.section("Cierres del período")
+    _kpis_cierres(closures.closure_stats(closed, start),
+                  closures.closure_stats(prev_closed, p_start) if prev_closed is not None
+                  else None,
+                  vs, _closure_trends(ld["closed_monthly"], ld["months"]))
+    if b.empty:
+        _closed_listing(closed, label)
+        return
 
     # Los meses que todavía no empezaron no se dibujan (quedarían en 0)
     today = datetime.now().date()
     period_months = periods.year_months_spanning(start, min(end, today))
     if len(period_months) > 1:
         ui.section("Evolución del período")
-        _evolucion_card(b, period_months, label)
+        _evolucion_card(b, closed, period_months, label)
 
     ui.section("Estado del pipeline")
     c1, c2 = st.columns([7, 5])
@@ -388,11 +465,17 @@ def render() -> None:
         zones_card("zonas_negocios", "Por provincia", b["Zona"], "negocios",
                    f"provincias_negocios_{label}", toggle=True, height=BOTTOM_H)
 
-    listing_cols = ["Fecha movimiento", "Fecha creacion", "Nombre negocio", "Tipo maquinaria",
-                    "Cliente", "Compania", "Etapa", "Etapa anterior", "Fuente",
-                    "Motivo de baja", "Telefono", "Zona"]
-    listing = b[[c for c in listing_cols if c in b.columns]]
+    listing = b[[c for c in LISTING_COLS if c in b.columns]]
     ui.raw_data("negocios", f"Lista de negocios del período ({len(listing)})",
                 style_bitrix_table(listing), listing,
                 f"actividad_comercial_negocios_{label}.csv",
+                column_config={"Tipo maquinaria": {"hidden": True}})
+    _closed_listing(closed, label)
+
+
+def _closed_listing(closed: pd.DataFrame, label: str) -> None:
+    listing = closed[[c for c in LISTING_COLS if c in closed.columns]]
+    ui.raw_data("cierres", f"Negocios cerrados en el período ({len(listing)})",
+                style_bitrix_table(listing), listing,
+                f"actividad_comercial_cierres_{label}.csv",
                 column_config={"Tipo maquinaria": {"hidden": True}})

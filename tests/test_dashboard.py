@@ -100,6 +100,45 @@ def test_hbar_orders_largest_on_top():
     opt = charts.hbar(["Grande", "Chico"], [9, 1], "#01498E", "f")
     assert opt["yAxis"]["data"] == ["Chico", "Grande"]   # ECharts dibuja de abajo hacia arriba
 
+# --- cierres ------------------------------------------------------------------
+def _deals():
+    """Negocios de ejemplo con fechas ya convertidas (como deals_between)."""
+    return pd.DataFrame({
+        "ID negocio": ["1", "2", "3", "4", "5"],
+        "Etapa": ["Cerrado Ganado", "Cerrado Perdido", "En negociación",
+                  "Ganado en Desarrollo", "Cerrado Ganado"],
+        "_cre_dt": pd.to_datetime(["2025-11-10", "2026-02-01", "2026-01-05",
+                                   "2026-01-10", "2026-03-01"]),
+        "_mov_dt": pd.to_datetime(["2026-03-15", "2026-02-20", "2026-03-01",
+                                   "2026-03-02", "2026-04-02"]),
+    })
+
+
+def test_closure_stats_counts_carryover_and_lifetime():
+    from utils import closures
+    d = _deals()
+    closed = d[closures.closed_mask(d) & (d["_mov_dt"] <= "2026-03-31")]
+    s = closures.closure_stats(closed, date(2026, 1, 1))
+    assert s["cerrados"] == 2 and s["ganados"] == 1     # abierto y "Ganado en Desarrollo" no
+    assert s["arrastre"] == 50.0                        # el negocio 1 se creó en 2025
+    assert s["vida"] == (125 + 19) / 2 and s["n_vida"] == 2
+
+
+def test_closure_stats_empty():
+    from utils import closures
+    s = closures.closure_stats(pd.DataFrame(), date(2026, 1, 1))
+    assert s == {"cerrados": 0, "ganados": 0, "arrastre": None, "vida": None, "n_vida": 0}
+
+
+def test_deals_created_vs_closed_between(monkeypatch):
+    from utils import data
+    monkeypatch.setattr(data, "deals_between", lambda s, e, **kw: (_deals(), {}, []))
+    created, _, _ = data.deals_created_between(date(2026, 1, 1), date(2026, 3, 31))
+    closed, _, _ = data.deals_closed_between(date(2026, 1, 1), date(2026, 3, 31))
+    assert sorted(created["ID negocio"]) == ["2", "3", "4", "5"]
+    assert sorted(closed["ID negocio"]) == ["1", "2"]   # cerrados en el período, de cualquier creación
+
+
 # --- cuota de Google Sheets y caché por antigüedad ----------------------------
 def _quota_error():
     import gspread
