@@ -17,6 +17,10 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Configuración local de Obsidian (vault de la Ayuda en docs/)
+.obsidian/
+.trash/
+
 # Datos de contactos y cachés locales: nunca versionar
 data/cache/
 data/pending_changes.json
