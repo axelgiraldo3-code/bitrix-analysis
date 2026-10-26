@@ -99,3 +99,66 @@ def test_stacked_bars_no_white_border_and_hide_thin_labels():
 def test_hbar_orders_largest_on_top():
     opt = charts.hbar(["Grande", "Chico"], [9, 1], "#01498E", "f")
     assert opt["yAxis"]["data"] == ["Chico", "Grande"]   # ECharts dibuja de abajo hacia arriba
+
+# --- cuota de Google Sheets y caché por antigüedad ----------------------------
+def _quota_error():
+    import gspread
+
+    class _Resp:
+        status_code = 429
+        text = "Quota exceeded"
+
+        def json(self):
+            return {"error": {"code": 429, "message": "Quota exceeded",
+                              "status": "RESOURCE_EXHAUSTED"}}
+
+    return gspread.exceptions.APIError(_Resp())
+
+
+def test_is_quota_error():
+    from utils import sheets
+    assert sheets.is_quota_error(_quota_error())
+    assert not sheets.is_quota_error(ValueError("429"))
+
+
+def test_read_months_batch_splits_past_and_current(monkeypatch):
+    from utils import sheets
+    now = date.today()
+    current = f"{now.year:04d}-{now.month:02d}"
+    calls = {}
+    monkeypatch.setattr(sheets, "_read_batch_past",
+                        lambda yms, kind: calls.setdefault("past", yms) and {y: y for y in yms})
+    monkeypatch.setattr(sheets, "_read_batch_current",
+                        lambda yms, kind: calls.setdefault("current", yms) and {y: y for y in yms})
+    out = sheets.read_months_batch(("2020-01", current), "Bitrix")
+    assert calls == {"past": ("2020-01",), "current": (current,)}
+    assert list(out) == ["2020-01", current]
+
+
+def test_bitrix_period_quota_is_a_warning(monkeypatch):
+    from utils import data, sheets
+
+    def boom(*a, **kw):
+        raise _quota_error()
+
+    monkeypatch.setattr(sheets, "get_last_bitrix_sync", boom)
+    monkeypatch.setattr(data.st, "session_state", {})
+    df, sources, warns = data.load_bitrix_period(("2026-01", "2026-02", "2026-03"))
+    assert df.empty and set(sources.values()) == {"error"}
+    assert warns == [data.SHEETS_QUOTA_WARNING]
+
+
+@pytest.mark.parametrize("ym, days", [
+    ("2026-10", 7), ("2026-09", 7), ("2026-08", 30), ("2025-12", 30),
+])
+def test_snapshot_ttl_by_age(ym, days):
+    from datetime import datetime
+    from utils import data
+    assert data.snapshot_ttl_days(ym, today=datetime(2026, 10, 25)) == days
+
+
+def test_snapshot_ttl_previous_month_across_year():
+    from datetime import datetime
+    from utils import data
+    assert data.snapshot_ttl_days("2025-12", today=datetime(2026, 1, 5)) == 7
+

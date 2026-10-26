@@ -123,10 +123,19 @@ with st.sidebar:
 
     st.markdown("### Datos")
     _mes = st.session_state.get("mes", _months_bot[0])
-    last_sync = sheets.get_last_bitrix_sync(_mes)
-    if last_sync:
+    try:
+        last_sync = sheets.get_last_bitrix_sync(_mes)
+        sync_unknown = False
+    except Exception as e:
+        if not sheets.is_quota_error(e):
+            raise
+        last_sync, sync_unknown = None, True
+    if sync_unknown:
+        st.caption(f":material/hourglass_empty: Bitrix {_mes}: estado no disponible "
+                   "(cuota de Google Sheets, reintentá en un minuto)")
+    elif last_sync:
         age_days = (datetime.now() - last_sync).days
-        if age_days < data.BITRIX_SNAPSHOT_TTL_DAYS:
+        if age_days < data.snapshot_ttl_days(_mes):
             icon, state = ":material/check_circle:", "al día"
         else:
             icon, state = ":material/schedule:", "desactualizado"
@@ -136,7 +145,8 @@ with st.sidebar:
         st.caption(f":material/cloud_off: Bitrix {_mes}: sin snapshot")
     if st.button("Recargar Bitrix desde API", width="stretch",
                  help="Fuerza traer los negocios del mes desde Bitrix24 "
-                      "(ignora el snapshot). Se refresca solo cada 7 días."):
+                      "(ignora el snapshot). Se refresca solo cada 7 días (mes en curso "
+                      "y anterior) o 30 días (meses más viejos)."):
         st.session_state["_force_month"] = True
         st.rerun()
     if st.button("Actualizar índice de teléfonos", width="stretch",

@@ -232,19 +232,52 @@ def _read_month_fresh(year_month: str, kind: str) -> tuple[Optional[gspread.Work
     return ws, _values_to_df(ws.get_all_values(), headers)
 
 
-@st.cache_data(ttl=120, show_spinner=False)
-def read_month_dataframe(year_month: str, kind: str) -> pd.DataFrame:
-    """Lee una pestaña mensual del libro destino. Cacheada 2 min para no
-    saturar el rate limit de Google Sheets (60 reads/min por usuario). Sólo
-    para MOSTRAR datos; antes de escribir se usa _read_month_fresh()."""
+# Caché de lectura de pestañas mensuales (60 lecturas/min por usuario en
+# Google Sheets). El mes en curso cambia seguido: 2 min. Los meses ya
+# terminados casi no cambian: 6 h. Toda escritura desde la app invalida
+# ambas (``_invalidate_month_cache``); sólo una edición a mano en la planilla
+# puede tardar hasta 6 h en verse (o "Limpiar caché").
+MONTH_TTL_CURRENT_SEC = 120
+MONTH_TTL_PAST_SEC = 6 * 3600
+
+
+def _is_past_month(year_month: str) -> bool:
+    now = datetime.now()
+    return year_month < f"{now.year:04d}-{now.month:02d}"
+
+
+def is_quota_error(e: Exception) -> bool:
+    """Google Sheets rechazó el pedido por superar la cuota (HTTP 429)."""
+    return isinstance(e, gspread.exceptions.APIError) and (
+        getattr(getattr(e, "response", None), "status_code", None) == 429
+        or "429" in str(e))
+
+
+@st.cache_data(ttl=MONTH_TTL_CURRENT_SEC, show_spinner=False)
+def _read_month_current(year_month: str, kind: str) -> pd.DataFrame:
     return _read_month_fresh(year_month, kind)[1]
 
 
+@st.cache_data(ttl=MONTH_TTL_PAST_SEC, show_spinner=False)
+def _read_month_past(year_month: str, kind: str) -> pd.DataFrame:
+    return _read_month_fresh(year_month, kind)[1]
+
+
+def read_month_dataframe(year_month: str, kind: str) -> pd.DataFrame:
+    """Lee una pestaña mensual del libro destino, con caché según la
+    antigüedad del mes. Sólo para MOSTRAR datos; antes de escribir se usa
+    _read_month_fresh()."""
+    if _is_past_month(year_month):
+        return _read_month_past(year_month, kind)
+    return _read_month_current(year_month, kind)
+
+
 def _invalidate_month_cache() -> None:
-    try:
-        read_month_dataframe.clear()
-    except Exception:
-        pass
+    for fn in (_read_month_current, _read_month_past, _read_batch_current, _read_batch_past):
+        try:
+            fn.clear()
+        except Exception:
+            pass
 
 
 def write_month_dataframe(year_month: str, kind: str, df: pd.DataFrame) -> None:
@@ -328,12 +361,32 @@ def batch_upsert_bot_rows(year_month: str, rows: list[dict],
     _apply_row_changes(year_month, ws, updates, appends)
 
 
-@st.cache_data(ttl=900, show_spinner=False)
 def read_months_batch(year_months: tuple[str, ...], kind: str) -> dict[str, pd.DataFrame]:
-    """Varias pestañas mensuales en un solo pedido (para la tendencia de
-    meses anteriores): 1 lectura de la lista de pestañas + 1 lectura de
-    valores, en lugar de ~3 lecturas por mes. Cacheada 15 min. Los meses sin
-    pestaña vuelven vacíos."""
+    """Varias pestañas mensuales en un solo pedido: 1 lectura de la lista de
+    pestañas + 1 lectura de valores, en lugar de ~3 lecturas por mes. Los
+    meses terminados y el mes en curso se cachean aparte, con el mismo TTL
+    que ``read_month_dataframe``. Los meses sin pestaña vuelven vacíos."""
+    past = tuple(ym for ym in year_months if _is_past_month(ym))
+    current = tuple(ym for ym in year_months if not _is_past_month(ym))
+    out: dict[str, pd.DataFrame] = {}
+    if past:
+        out.update(_read_batch_past(past, kind))
+    if current:
+        out.update(_read_batch_current(current, kind))
+    return {ym: out[ym] for ym in year_months}
+
+
+@st.cache_data(ttl=MONTH_TTL_CURRENT_SEC, show_spinner=False)
+def _read_batch_current(year_months: tuple[str, ...], kind: str) -> dict[str, pd.DataFrame]:
+    return _read_batch(year_months, kind)
+
+
+@st.cache_data(ttl=MONTH_TTL_PAST_SEC, show_spinner=False)
+def _read_batch_past(year_months: tuple[str, ...], kind: str) -> dict[str, pd.DataFrame]:
+    return _read_batch(year_months, kind)
+
+
+def _read_batch(year_months: tuple[str, ...], kind: str) -> dict[str, pd.DataFrame]:
     headers = _headers_for(kind)
     out = {ym: pd.DataFrame(columns=headers) for ym in year_months}
     if not year_months:
