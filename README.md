@@ -27,10 +27,13 @@ Aplicación Streamlit para analizar los reportes del bot de WhatsApp
 
 ```
 app.py                      Punto de entrada: estilos, datos comunes, barra lateral y navegación
+docs/ayuda/                 Notas de la Ayuda (Markdown estilo Obsidian, índice en Ayuda.md)
 views/
   reporte.py                Página "Reporte mensual" (consultas del bot)
   negocios.py               Página "Negocios Bitrix24"
   clasificacion.py          Página "Clasificación manual"
+  analisis.py               Página "Análisis preliminar" (embudo)
+  ayuda.py                  Página "Ayuda": muestra las notas de docs/ayuda/
   common.py                 Filtro de mes y tarjeta de provincias (mapa + ranking)
 utils/
   data.py                   Carga con caché (bot, Bitrix, índice) y armado del mes / período

@@ -108,6 +108,41 @@ _PATTERNS: list[tuple[str, str]] = [
 
 _COMPILED = [(re.compile(p), cat) for p, cat in _PATTERNS]
 
+# Ejemplos legibles de nombres que reconoce cada categoría (nota "Tipos de
+# máquina" de la Ayuda). Las pruebas verifican que cada uno se clasifique en
+# su categoría: al cambiar un patrón, ajustar también estos ejemplos.
+EXAMPLES: dict[str, list[str]] = {
+    "Torno CNC": ["torno CNC", "centro de torneado", "torno tipo suizo", "torno vertical",
+                  "VTL", "torno de bancada inclinada", "torno multitarea",
+                  "torno petrolero", "torno roscador"],
+    "Torno convencional": ["torno", "torno convencional", "torno petrolero convencional"],
+    "Centro de mecanizado": ["centro de mecanizado", "VMC", "HMC", "centro vertical",
+                             "centro horizontal", "5 ejes"],
+    "Fresadora convencional": ["fresadora", "fresadora universal", "Bridgeport"],
+    "Fresadora CNC": ["fresadora CNC", "router"],
+    "Cortadora de chapa láser": ["láser", "láser de fibra", "fibra óptica"],
+    "Rectificadora CNC": ["rectificadora", "amoladora plana"],
+    "Curvadora de tubos": ["curvadora", "dobladora de caños", "curvatubos"],
+    "Mortajadora": ["mortajadora", "mortaja"],
+    "Cortadora de tubo láser": ["láser de tubos", "láser de caños", "láser de perfiles"],
+    "Cortadora láser dual": ["láser dual", "láser de chapa y tubo"],
+    "Cortadora CNC plasma": ["plasma", "oxicorte", "pantógrafo"],
+    "Sistema de soldadura automática": ["soldadora", "robot de soldadura"],
+    "Cortadora de caños a disco": ["sierra circular", "tronzadora", "cortadora de caños"],
+    "Alesadora": ["alesadora", "mandrinadora"],
+    "Centro de perforado": ["centro de perforado", "taladro radial", "agujereadora"],
+    "Plegadora": ["plegadora", "dobladora de chapa", "press brake"],
+    "Cortadora guillotina": ["guillotina", "cizalla"],
+    "Brochadora": ["brochadora"],
+}
+
+
+def examples_table() -> str:
+    """Tabla Markdown [Tipo de máquina | Nombres que se reconocen]."""
+    rows = [f"| {cat} | {', '.join(EXAMPLES[cat])} |"
+            for cat in CATEGORIES if cat in EXAMPLES]
+    return "\n".join(["| Tipo de máquina | Nombres que se reconocen |", "|---|---|", *rows])
+
 
 def normalize(text: str) -> str:
     """Minúsculas, sin tildes, 'ñ' → 'n', 'C.N.C.' → 'cnc', espacios simples."""
