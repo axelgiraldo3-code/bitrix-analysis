@@ -380,6 +380,30 @@ def test_timeseries_lines_are_smooth():
     assert opt["series"][0]["smooth"]
 
 
+def test_leader_by_month():
+    from datetime import datetime
+    import pandas as pd
+    from utils.trends import leader_by_month
+    dts = pd.Series([datetime(2026, 8, 3), datetime(2026, 8, 9), datetime(2026, 8, 20),
+                     datetime(2026, 9, 1)])
+    src = pd.Series(["WhatsApp", "RRSS", "WhatsApp", "Correo"])
+    out = leader_by_month(dts, src, ["2026-07", "2026-08", "2026-09"])
+    assert out == [("—", 0, 0), ("WhatsApp", 2, 3), ("Correo", 1, 1)]
+
+
+def test_leader_bars():
+    from utils import charts
+    leaders = [("—", 0, 0), ("WhatsApp", 2, 3), ("Correo", 1, 1), ("WhatsApp", 4, 8)]
+    opt = charts.leader_bars(["Jul", "Ago", "Sep", "Oct"], leaders,
+                             {"WhatsApp": "#11734B", "Correo": "#E67E22"}, "f")
+    assert [s["name"] for s in opt["series"]] == ["WhatsApp", "Correo"]
+    wa = opt["series"][0]
+    assert wa["itemStyle"]["color"] == "#11734B"
+    assert wa["data"][0] == "-" and wa["data"][2] == "-"
+    assert wa["data"][3]["value"] == 4.0
+    assert "4 de 8 (50,0 %)" in wa["data"][3]["tooltip"]["formatter"]
+
+
 def test_weekday_counts():
     from datetime import date, datetime
     import pandas as pd

@@ -23,6 +23,8 @@ TYPE_COLS = ":material/bar_chart:"
 TOP_MACHINES = 6
 # Altura común de las tarjetas "tipo de máquina" y "motivos de baja"
 CHART_H = 500
+# Altura común de "mes a mes" y "fuente principal"
+EVOL_H = 340
 # Altura común de "por fuente" y "por provincia"
 BOTTOM_H = 380
 PERIOD_KINDS = ["Mes", "Trimestre", "Semestre", "Año", "Rango personalizado"]
@@ -164,13 +166,9 @@ def _evolucion_card(b: pd.DataFrame, months: list[str], label: str) -> None:
     etapas = b["Etapa"].astype(str).str.strip().str.lower()
     closed_mask = etapas.str.startswith("cerrado")
     closed = trends.by_month(b.loc[closed_mask, "_cre_dt"], months)
-    # Fuente destacada del período (la del KPI) y cuántos negocios trajo cada mes
-    top_src, _ = kpis.top_category(b["Fuente"])
-    top_label = f"Fuente destacada: {top_src}"
-    by_src = trends.by_month(b.loc[b["Fuente"] == top_src, "_cre_dt"], months)
     cats = [periods.month_label(m) for m in months]
     table_df = pd.DataFrame({"Mes": cats, "Negocios del período": created,
-                             "Cerrados": closed, top_label: by_src})
+                             "Cerrados": closed})
 
     def controls():
         st.segmented_control("Tipo", [TYPE_LINE, TYPE_COLS], default=TYPE_LINE,
@@ -182,17 +180,39 @@ def _evolucion_card(b: pd.DataFrame, months: list[str], label: str) -> None:
             else "line"
         series = [("Negocios del período", created, COTEAR_BLUE),
                   ("Cerrados", closed, COTEAR_GRAY)]
-        if top_src != "—":
-            series.append((top_label, by_src, source_color(top_src), "dashed"))
         ui.echart(charts.timeseries(cats, series,
                                     f"evolucion_negocios_{label}", kind=kind,
-                                    y_name="Negocios"),
-                  height=340)
+                                    y_name="Negocios", width=620),
+                  height=EVOL_H)
 
     def table():
         st.dataframe(table_df, hide_index=True, width="stretch")
 
     ui.chart_card("evolucion", "Mes a mes", chart, table, controls=controls)
+
+
+@st.fragment
+def _fuente_mes_card(b: pd.DataFrame, months: list[str], label: str) -> None:
+    """La fuente con más negocios creados en cada mes, en su color."""
+    leaders = trends.leader_by_month(b["_cre_dt"], b["Fuente"], months)
+    cats = [periods.month_label(m) for m in months]
+    colors = {name: source_color(name) for name, _, _ in leaders}
+    table_df = pd.DataFrame({
+        "Mes": cats, "Fuente principal": [n for n, _, _ in leaders],
+        "Negocios": [v for _, v, _ in leaders],
+        "Negocios del mes": [t for _, _, t in leaders],
+        "%": [round(v / t * 100, 1) if t else None for _, v, t in leaders]})
+
+    def chart():
+        ui.echart(charts.leader_bars(cats, leaders, colors, f"fuente_principal_{label}",
+                                     y_name="Negocios", width=440),
+                  height=EVOL_H)
+
+    def table():
+        st.dataframe(table_df, hide_index=True, width="stretch",
+                     column_config={"%": st.column_config.NumberColumn(format="%.1f %%")})
+
+    ui.chart_card("fuente_mes", "Fuente principal", chart, table)
 
 
 @st.fragment
@@ -371,7 +391,11 @@ def render() -> None:
     period_months = periods.year_months_spanning(start, min(end, today))
     if len(period_months) > 1:
         ui.section("Evolución del período")
-        _evolucion_card(b, period_months, label)
+        e1, e2 = st.columns([7, 5])
+        with e1:
+            _evolucion_card(b, period_months, label)
+        with e2:
+            _fuente_mes_card(b, period_months, label)
 
     ui.section("Estado del pipeline")
     c1, c2 = st.columns([7, 5])

@@ -6,6 +6,7 @@
   sumado en "Otros" (sólo para el gráfico; la tabla de datos va completa).
 * ``by_month`` / ``weekday_hour_cells`` / ``daily_counts``: conteos por
   mes, por día de semana × hora y por día del mes.
+* ``leader_by_month``: la categoría líder de cada mes y sus casos.
 """
 from __future__ import annotations
 
@@ -63,6 +64,19 @@ def by_month(dates: pd.Series, months: Sequence[str]) -> list[int]:
     keys = dates.map(month_key)
     vc = keys.value_counts()
     return [int(vc.get(m, 0)) for m in months]
+
+
+def leader_by_month(dates: pd.Series, values: pd.Series,
+                    months: Sequence[str]) -> list[tuple[str, int, int]]:
+    """Para cada 'YYYY-MM' de ``months``: (categoría líder de ese mes, sus
+    casos, total del mes). Un mes sin casos da ("—", 0, 0)."""
+    keys = dates.map(month_key)
+    out = []
+    for m in months:
+        in_month = values[keys == m]
+        top, n = top_category(in_month)
+        out.append((top, n, int(len(in_month))))
+    return out
 
 
 def _as_datetime(values: pd.Series) -> pd.Series:
