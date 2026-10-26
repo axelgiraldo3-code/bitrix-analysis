@@ -247,28 +247,20 @@ def timeseries(categories: Sequence[str], series: Sequence[tuple[str, Sequence[f
                filename: str, *, kind: str = "line", y_name: str = "",
                width: int = 900) -> dict:
     """Evolución en el tiempo: líneas o columnas agrupadas (no apiladas).
-    ``series`` = [(nombre, valores, color), ...]; un cuarto elemento
-    ``"dashed"`` dibuja esa línea punteada (y la columna con trama)."""
+    ``series`` = [(nombre, valores, color), ...]."""
     out = []
-    for name, values, color, *opts in series:
-        dashed = "dashed" in opts
+    for name, values, color in series:
         item: dict = {"name": name, "type": "bar" if kind == "bar" else "line",
                       "itemStyle": {"color": color},
                       "emphasis": {"focus": "series"},
                       "data": [float(v) for v in values]}
         if kind == "bar":
-            style = {"color": color, "borderRadius": [4, 4, 0, 0]}
-            if dashed:
-                style.update(decal={"symbol": "rect", "dashArrayX": [1, 0],
-                                    "dashArrayY": [3, 3], "rotation": 0.8,
-                                    "color": "rgba(255,255,255,0.45)"})
-            item.update(barMaxWidth=28, itemStyle=style,
+            item.update(barMaxWidth=28, itemStyle={"color": color, "borderRadius": [4, 4, 0, 0]},
                         label={"show": True, "position": "top", "color": TEXT, "fontSize": 11,
                                "formatter": "{c}"})
         else:
             item.update(smooth=SMOOTH, smoothMonotone="x", symbol="circle", symbolSize=7,
-                        lineStyle={"width": 2.5, "color": color,
-                                   "type": "dashed" if dashed else "solid"},
+                        lineStyle={"width": 2.5, "color": color},
                         label={"show": len(categories) <= 14, "position": "top",
                                "color": TEXT, "fontSize": 11})
         out.append(item)
@@ -285,6 +277,48 @@ def timeseries(categories: Sequence[str], series: Sequence[tuple[str, Sequence[f
                   "axisLabel": {"color": TEXT}},
         "yAxis": {**_value_axis(y_name), "minInterval": 1},
         "series": out,
+    }
+
+
+def leader_bars(categories: Sequence[str], leaders: Sequence[tuple[str, int, int]],
+                colors: dict[str, str], filename: str, *, y_name: str = "",
+                width: int = 600) -> dict:
+    """Una columna por período con la categoría líder de ese período, en su
+    color. ``leaders`` = [(líder, casos, total del período), ...]; un período
+    sin casos queda vacío. Cada líder es una serie (para la leyenda) apilada
+    con las demás, así la columna queda centrada aunque las otras estén
+    vacías. Tooltip: "Sep-26 · WhatsApp<br/>12 de 30 (40,0 %)"."""
+    names = list(dict.fromkeys(n for n, v, _ in leaders if v))
+    out_series = []
+    for name in names:
+        data: list = []
+        for cat, (lead, v, total) in zip(categories, leaders):
+            if lead != name or not v:
+                data.append("-")
+                continue
+            pct = pct_label(v / total * 100) if total else "—"
+            data.append({"value": float(v), "tooltip": {"formatter": (
+                f"{html.escape(str(cat))} · {html.escape(name)}<br/>"
+                f"{_num(v)} de {_num(total)} ({pct})")}})
+        out_series.append({
+            "name": name, "type": "bar", "stack": "lider", "barMaxWidth": 40,
+            "itemStyle": {"color": colors.get(name, COTEAR_GRAY), "borderRadius": [4, 4, 0, 0]},
+            "label": {"show": True, "position": "top", "color": TEXT, "fontSize": 11,
+                      "formatter": "{c}"},
+            "data": data,
+        })
+    return {
+        **_base(filename),
+        "tooltip": {"trigger": "item", "confine": True},
+        "legend": _legend(type="plain", bottom=0, left="center"),
+        "grid": {"left": 8, "right": 16, "top": 36, "containLabel": True,
+                 "bottom": legend_rows(names, width - 16) * 22 + 12},
+        "xAxis": {"type": "category", "data": [str(c) for c in categories],
+                  "axisTick": {"show": False},
+                  "axisLine": {"lineStyle": {"color": "#D5DBE1"}},
+                  "axisLabel": {"color": TEXT}},
+        "yAxis": {**_value_axis(y_name), "minInterval": 1},
+        "series": out_series,
     }
 
 
