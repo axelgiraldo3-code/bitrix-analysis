@@ -14,7 +14,7 @@ from datetime import datetime
 import streamlit as st
 
 from utils import cache, data, pending, sheets, ui
-from views import analisis, clasificacion, negocios, reporte
+from views import analisis, ayuda, clasificacion, negocios, reporte
 
 st.set_page_config(
     page_title="COTEAR · Informe de Actividad Comercial",
@@ -45,7 +45,25 @@ if _recovered:
                 st.rerun()
 
 
-# --- Reportes del bot (comunes a todas las páginas) -------------------------
+# --- Navegación (antes de cargar datos: la Ayuda no los necesita) ----------
+page = st.navigation([
+    st.Page(reporte.render, title="Reporte mensual", icon=":material/insights:",
+            url_path="reporte", default=True),
+    st.Page(negocios.render, title="Negocios Bitrix24", icon=":material/handshake:",
+            url_path="negocios"),
+    st.Page(clasificacion.render, title="Clasificación manual", icon=":material/fact_check:",
+            url_path="clasificacion"),
+    st.Page(analisis.render, title="Análisis preliminar", icon=":material/science:",
+            url_path="analisis"),
+    st.Page(ayuda.render, title="Ayuda", icon=":material/help:", url_path="ayuda"),
+])
+# La Ayuda abre aunque no se puedan leer los datos (sin filtros ni panel de datos)
+if page.url_path == "ayuda":
+    page.run()
+    st.stop()
+
+
+# --- Reportes del bot (comunes al resto de las páginas) ---------------------
 try:
     _bot_raw = data.load_bot()
 except Exception as e:
@@ -59,18 +77,6 @@ if not _months_bot:
 st.session_state["_bot_raw"] = _bot_raw
 st.session_state["_months_bot"] = _months_bot
 
-
-# --- Navegación ---------------------------------------------------------------
-page = st.navigation([
-    st.Page(reporte.render, title="Reporte mensual", icon=":material/insights:",
-            url_path="reporte", default=True),
-    st.Page(negocios.render, title="Negocios Bitrix24", icon=":material/handshake:",
-            url_path="negocios"),
-    st.Page(clasificacion.render, title="Clasificación manual", icon=":material/fact_check:",
-            url_path="clasificacion"),
-    st.Page(analisis.render, title="Análisis preliminar", icon=":material/science:",
-            url_path="analisis"),
-])
 st.sidebar.markdown("### Filtros")
 page.run()
 

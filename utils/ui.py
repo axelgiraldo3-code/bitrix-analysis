@@ -88,7 +88,7 @@ def inject_css() -> None:
       .ct-section {{
         font-size: 1.17rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
         color: var(--ct-blue); margin: .9rem 0 0 .1rem;
-        display: flex; align-items: center; gap: .6rem;
+        display: flex; align-items: center; gap: .6rem; scroll-margin-top: 4.5rem;
       }}
       .ct-section::after {{ content: ""; flex: 1; height: 1px; background: var(--ct-line); }}
       .ct-section-sub {{ font-size: .8rem; color: var(--ct-muted); margin: .1rem 0 0 .1rem; }}
@@ -195,10 +195,13 @@ def page_header(title: str, subtitle: str = "") -> None:
         st.space("small")
 
 
-def section(title: str, subtitle: str = "") -> None:
-    """Título de un grupo de tarjetas relacionadas."""
+def section(title: str, subtitle: str = "", anchor: str = "") -> None:
+    """Título de un grupo de tarjetas relacionadas. ``anchor``: id para
+    enlazarlo desde un índice (``[texto](#anchor)``)."""
     sub = f"<div class='ct-section-sub'>{subtitle}</div>" if subtitle else ""
-    st.markdown(f"<div class='ct-section'>{title}</div>{sub}", unsafe_allow_html=True)
+    id_attr = f" id='{anchor}'" if anchor else ""
+    st.markdown(f"<div class='ct-section'{id_attr}>{title}</div>{sub}",
+                unsafe_allow_html=True)
 
 
 def _trend_color(delta: dict) -> str:
