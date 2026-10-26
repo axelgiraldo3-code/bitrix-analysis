@@ -144,6 +144,28 @@ def test_classify_machinery_synonyms(title, cat):
     assert classify_machinery(title) == cat
 
 
+# Sinónimos tomados de los aliases del vault de Obsidian (Maquinas/)
+@pytest.mark.parametrize("title, cat", [
+    ("Torno slant bed 8\"", "Torno CNC"),
+    ("Torno tipo suizo 32 mm", "Torno CNC"),
+    ("Torno petrolero 9\" pasaje", "Torno CNC"),
+    ("Torno petrolero convencional", "Torno convencional"),
+    ("Torno pesado 630", "Torno convencional"),
+    ("VTL 1600", "Torno CNC"),
+    ("Centro de maquinado 5 ejes", "Centro de mecanizado"),
+    ("Drill tap 600", "Centro de perforado"),
+    ("Fresadora a control numérico", "Fresadora CNC"),
+    ("Fresadora tipo Bridgeport", "Fresadora convencional"),
+    ("Mandriladora horizontal", "Alesadora"),
+    ("Boring mill 110", "Alesadora"),
+    ("Brochadora hidráulica", "Brochadora"),
+    ("Surface grinder 618", "Rectificadora CNC"),
+    ("Tube bender CNC", "Curvadora de tubos"),
+])
+def test_classify_machinery_vault_aliases(title, cat):
+    assert classify_machinery(title) == cat
+
+
 def test_short_labels_trim_and_keep_unique():
     from utils.styling import short_labels
     out = short_labels([
