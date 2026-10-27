@@ -32,7 +32,7 @@ views/
   reporte.py                Página "Reporte mensual" (consultas del bot)
   negocios.py               Página "Negocios Bitrix24"
   clasificacion.py          Página "Clasificación manual"
-  analisis.py               Página "Análisis preliminar" (embudo)
+  analisis.py               Página "Análisis preliminar" (embudo e informe del mes)
   ayuda.py                  Página "Ayuda": muestra las notas de docs/ayuda/
   common.py                 Filtro de mes y tarjeta de provincias (mapa + ranking)
 utils/
@@ -45,6 +45,8 @@ utils/
   phone_ar.py               Formato '+54 9 <area> <local>' y provincia por código de área
   geo.py                    Conteo por provincia con agrupación en "Otros"
   cache.py                  Limpieza, unificación mensual, reglas automáticas, áreas
+  informe.py                Informe del mes descargable (ZIP: Markdown + PNG)
+  informe_img.py            Gráficos del informe en PNG (matplotlib)
   machinery.py              Clasificación de maquinaria por nombre del negocio
   pending.py                Cola de clasificaciones sin sincronizar
   periods.py                Rangos de mes / trimestre / año y período anterior
@@ -76,6 +78,9 @@ página abierta.
   provincias y lista de negocios (columna Tipo maquinaria oculta).
 - **Clasificación manual**: selección de un reporte y guardado en cola; el
   botón *Sincronizar* de la barra lateral lo escribe en Sheets.
+- **Análisis preliminar**: embudo consultas → derivadas → cotizadas → ganadas
+  y "Descargar informe (ZIP)": borrador del reporte de actividad del mes en
+  Markdown (estilo Obsidian) con sus gráficos en PNG, para completar a mano.
 
 ### Diseño
 
