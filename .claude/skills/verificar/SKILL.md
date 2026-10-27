@@ -1,14 +1,13 @@
 ---
 name: verificar
-description: Verifica un cambio antes de darlo por terminado - pytest, revisión del diff y chequeo de la app. Usar al terminar cualquier cambio de código en App-Coti.
+description: Verifica un cambio antes de darlo por terminado - ruff, pytest (con prueba de humo de las páginas), revisión del diff y chequeo visual si hace falta. Usar al terminar cualquier cambio de código en App-Coti.
 ---
 
-1. Correr `python -m pytest -q`. Si algo falla, corregirlo antes de seguir.
-2. Si se agregó o cambió una función pura en `utils/`, confirmar que tiene test en `tests/test_pure.py` (agregarlo si falta).
+1. `.venv/Scripts/ruff.exe check .` y `.venv/Scripts/python.exe -m pytest -q`. `tests/test_app_smoke.py` abre cada página con datos sintéticos: si una página tira una excepción, aparece acá. Corregir antes de seguir.
+2. Si se agregó o cambió una función pura en `utils/`, confirmar que tiene test (agregarlo si falta).
 3. Revisar `git diff` y confirmar que:
    - no hay credenciales, teléfonos ni datos de contactos;
-   - no se tocaron archivos ajenos al pedido;
-   - se respetan los finales de línea de cada archivo (algunos usan CRLF, como `tests/test_pure.py` y `.gitignore`).
-4. Si el cambio toca la interfaz, pedirle al usuario que lo pruebe con `streamlit run app.py` e indicarle qué página y tarjeta mirar.
+   - no se tocaron archivos ajenos al pedido.
+4. Sólo si el cambio es visual (layout, colores, textos de gráficos), pedirle al usuario que lo mire con `streamlit run app.py`, indicando página y tarjeta. Los errores de ejecución ya los cubre la prueba de humo.
 5. Si cambió el comportamiento de una sección, correr `/sync-requisitos`.
 6. Resumir en 2-4 líneas qué cambió y qué quedó pendiente de probar.
