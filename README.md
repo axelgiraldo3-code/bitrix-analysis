@@ -45,8 +45,7 @@ utils/
   phone_ar.py               Formato '+54 9 <area> <local>' y provincia por código de área
   geo.py                    Conteo por provincia con agrupación en "Otros"
   cache.py                  Limpieza, unificación mensual, reglas automáticas, áreas
-  informe.py                Informe del mes descargable (ZIP: Markdown + PNG)
-  informe_img.py            Gráficos del informe en PNG (matplotlib)
+  informe.py                Informe del mes descargable (nota Markdown)
   machinery.py              Clasificación de maquinaria por nombre del negocio
   pending.py                Cola de clasificaciones sin sincronizar
   periods.py                Rangos de mes / trimestre / año y período anterior
@@ -74,13 +73,13 @@ página abierta.
   cuenta los negocios **creados** dentro del período (con su etapa actual). Los
   KPIs se comparan con el período anterior de igual duración (mes, trimestre o
   año anterior; en un rango, los mismos días justo antes). Tipo de máquina ×
-  etapa (cantidad ⇄ %), motivos de baja (torta ⇄ barras), mapa + ranking de
-  provincias y lista de negocios (columna Tipo maquinaria oculta).
+  etapa (cantidad ⇄ %), motivos de baja (torta ⇄ barras), fuentes (sólidas ⇄
+  apiladas por etapa), mapa + ranking de provincias y lista de negocios (columna Tipo maquinaria oculta).
 - **Clasificación manual**: selección de un reporte y guardado en cola; el
   botón *Sincronizar* de la barra lateral lo escribe en Sheets.
 - **Análisis preliminar**: embudo consultas → derivadas → cotizadas → ganadas
-  y "Descargar informe (ZIP)": borrador del reporte de actividad del mes en
-  Markdown (estilo Obsidian) con sus gráficos en PNG, para completar a mano.
+  y "Descargar informe (.md)": borrador del reporte de actividad del mes en
+  Markdown (estilo Obsidian) que enlaza los gráficos descargados de la app.
 
 ### Diseño
 

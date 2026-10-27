@@ -15,10 +15,12 @@ from views.common import zones_card
 
 TYPE_PIE = ":material/donut_large:"
 TYPE_BAR = ":material/align_horizontal_left:"
+MODE_TOTAL = "Total"
 MODE_COUNT = "Cantidad"
 MODE_PCT = "Porcentaje"
 TYPE_LINE = ":material/show_chart:"
 TYPE_COLS = ":material/bar_chart:"
+TYPE_STACKED = ":material/stacked_bar_chart:"
 # Tipos de máquina que se dibujan por separado; el resto va en "Otros"
 TOP_MACHINES = 6
 # Altura común de las tarjetas "tipo de máquina" y "motivos de baja"
@@ -221,18 +223,34 @@ def _maquina_card(b: pd.DataFrame, label: str) -> None:
     ordered = [c for c in BITRIX_STAGE_ORDER if c in pivot.columns] + \
               [c for c in pivot.columns if c not in BITRIX_STAGE_ORDER]
     pivot = pivot[ordered]
-    total = pivot.sum(axis=1)
-    pivot = pivot.loc[total.sort_values(ascending=False).index]
+    total = pivot.sum(axis=1).sort_values(ascending=False)
+    pivot = pivot.loc[total.index]
     # El gráfico muestra los principales y agrupa el resto; la tabla, todos
     chart_pivot = trends.top_with_others(pivot, TOP_MACHINES)
 
+    def mode() -> str:
+        return st.session_state.get("bitrix_bar_mode", MODE_COUNT)
+
     def controls():
-        st.segmented_control("Mostrar", [MODE_COUNT, MODE_PCT], default=MODE_COUNT,
+        st.segmented_control("Mostrar", [MODE_TOTAL, MODE_COUNT, MODE_PCT], default=MODE_COUNT,
                              required=True, key="bitrix_bar_mode",
-                             label_visibility="collapsed", persist_state="session")
+                             label_visibility="collapsed", persist_state="session",
+                             help="Total: barras sólidas por tipo de máquina. Cantidad y "
+                                  "Porcentaje: segmentadas por etapa.")
 
     def chart():
-        pct = st.session_state.get("bitrix_bar_mode", MODE_COUNT) == MODE_PCT
+        if mode() == MODE_TOTAL:
+            # Barras sólidas: negocios por tipo de máquina (para el informe)
+            opt = charts.stacked_bars(chart_pivot.index.tolist(),
+                                      [("Negocios", chart_pivot.sum(axis=1).tolist(),
+                                        COTEAR_BLUE)],
+                                      f"demanda_productos_{label}", y_name="Negocios",
+                                      rotate=90, width=600, label_width=130)
+            opt.pop("legend", None)
+            opt["grid"]["bottom"] = 8
+            ui.echart(opt, height=CHART_H)
+            return
+        pct = mode() == MODE_PCT
         values = chart_pivot.div(chart_pivot.sum(axis=1), axis=0) * 100 if pct \
             else chart_pivot
         series = [(e, values[e].tolist(), BITRIX_STAGE_COLORS.get(e, "#BDC3C7"))
@@ -244,6 +262,12 @@ def _maquina_card(b: pd.DataFrame, label: str) -> None:
                   height=CHART_H)
 
     def table():
+        if mode() == MODE_TOTAL:
+            t = total.rename("Cantidad").rename_axis("Tipo maquinaria").reset_index()
+            t["%"] = (t["Cantidad"] / (t["Cantidad"].sum() or 1) * 100).round(1)
+            st.dataframe(t, hide_index=True, width="stretch",
+                         column_config={"%": st.column_config.NumberColumn(format="%.1f %%")})
+            return
         t = pivot.copy()
         t["Total"] = t.sum(axis=1)
         st.dataframe(t.reset_index(), hide_index=True, width="stretch")
@@ -306,17 +330,44 @@ def _fuentes_card(b: pd.DataFrame, label: str) -> None:
     total = sum(values) or 1
     table_df = pd.DataFrame({"Fuente": names, "Cantidad": values,
                              "%": [round(v / total * 100, 1) for v in values]})
+    # Segmentado: las mismas fuentes partidas por la etapa actual del negocio
+    pivot = (b.groupby(["Fuente", "Etapa"]).size().unstack(fill_value=0)
+             .reindex(index=names, fill_value=0))
+    pivot = pivot[[c for c in BITRIX_STAGE_ORDER if c in pivot.columns] +
+                  [c for c in pivot.columns if c not in BITRIX_STAGE_ORDER]]
+
+    def segmented() -> bool:
+        return st.session_state.get("tipo_fuentes", TYPE_BAR) == TYPE_STACKED
+
+    def controls():
+        st.segmented_control("Tipo", [TYPE_BAR, TYPE_STACKED], default=TYPE_BAR,
+                             required=True, key="tipo_fuentes", label_visibility="collapsed",
+                             persist_state="session",
+                             help="Barras sólidas: negocios por fuente. "
+                                  "Segmentadas: etapa actual de los negocios.")
 
     def chart():
-        ui.echart(charts.hbar(names, values, [source_color(n) for n in names],
-                              f"negocios_por_fuente_{label}", label_width=170),
-                  height=BOTTOM_H)
+        if segmented():
+            series = [(e, pivot[e].tolist(), BITRIX_STAGE_COLORS.get(e, "#BDC3C7"))
+                      for e in pivot.columns]
+            opt = charts.stacked_bars(names, series, f"fuentes_etapa_{label}",
+                                      y_name="Negocios", width=480, label_width=150,
+                                      horizontal=True)
+        else:
+            opt = charts.hbar(names, values, [source_color(n) for n in names],
+                              f"negocios_por_fuente_{label}", label_width=170)
+        ui.echart(opt, height=BOTTOM_H)
 
     def table():
-        st.dataframe(table_df, hide_index=True, width="stretch",
-                     column_config={"%": st.column_config.NumberColumn(format="%.1f %%")})
+        if segmented():
+            t = pivot.copy()
+            t["Total"] = t.sum(axis=1)
+            st.dataframe(t.reset_index(), hide_index=True, width="stretch")
+        else:
+            st.dataframe(table_df, hide_index=True, width="stretch",
+                         column_config={"%": st.column_config.NumberColumn(format="%.1f %%")})
 
-    ui.chart_card("fuentes", "Por fuente", chart, table)
+    ui.chart_card("fuentes", "Por fuente", chart, table, controls=controls)
 
 
 # ---------------------------------------------------------------------------
@@ -364,7 +415,7 @@ def render() -> None:
         return
     kind, start, end = sel
     p_start, p_end = periods.previous_period(start, end, kind)
-    label = f"{start.strftime('%d-%m-%y')}_a_{end.strftime('%d-%m-%y')}"
+    label = periods.range_label(start, end)
     prev_label = periods.period_label(p_start, p_end, kind)
     prev_short = periods.period_label(p_start, p_end, kind, short=True)
 

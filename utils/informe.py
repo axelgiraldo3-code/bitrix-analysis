@@ -1,5 +1,9 @@
-"""Informe mensual descargable: un ZIP con el informe en Markdown (estilo
-Obsidian) y sus gráficos en PNG, para revisar y completar a mano.
+"""Informe mensual descargable: una nota Markdown (estilo Obsidian) con las
+tablas armadas y los enlaces a los gráficos, para revisar y completar a mano.
+
+Los gráficos no se generan acá: la nota enlaza ``img/<nombre>.png`` con el
+nombre que la app le pone a cada gráfico al descargarlo (ícono de descarga
+de cada tarjeta), así alcanza con guardarlos en ``img/`` junto a la nota.
 
 Sigue la plantilla del reporte de actividad (el primero fue septiembre
 2026). Los números salen de:
@@ -12,30 +16,28 @@ Los textos de conclusiones quedan como borrador marcado para revisar.
 """
 from __future__ import annotations
 
-import io
-import zipfile
 from typing import Callable
 
 import pandas as pd
 
-from . import geo, informe_img, periods
-from .branding import (BITRIX_STAGE_COLORS, BITRIX_STAGE_ORDER, CLASSIFICATION_COLORS,
-                       COTEAR_BLUE, COTEAR_GRAY, _plain,
-                       canonical_motivo, canonical_source, motivo_color, source_color)
+from . import funnel, geo, periods
+from .branding import BITRIX_STAGE_ORDER, _plain, canonical_motivo, canonical_source
 from .charts import fmt_dec, pct_label
 from .machinery import OTHER as MACHINE_OTHER
 from .phone_ar import province_of
 
+# Descripción de cada clasificación, en el orden fijo de la tabla del informe
 CLASS_DESCRIPTIONS = {
     "DERIVADO A BITRIX": "Necesidad identificada y negocio generado.",
     "DERIVADO A TÉCNICA": "Consultas derivadas al área técnica.",
-    "DERIVADO A RRHH": "Búsqueda laboral, presentación de CV o propuestas comerciales.",
     "VENTA DE REPUESTOS": "Generó una venta de repuestos.",
+    "DERIVADO A RRHH": "Búsqueda laboral, presentación de CV o propuestas comerciales.",
     "SIN RESPUESTAS": "Nunca se pudo identificar la necesidad (abandono temprano).",
     "SIN INTERES": "Ofrecimiento de servicios o spam comercial.",
     "NECESIDAD INCOMPATIBLE": "Necesidad real fuera del catálogo de la empresa.",
     "SIN CLASIFICAR": "Todavía sin clasificar.",
 }
+CLASS_ORDER = list(CLASS_DESCRIPTIONS)
 # Consultas con una necesidad compatible derivada a un área interna
 DERIVADAS = ["DERIVADO A BITRIX", "DERIVADO A TÉCNICA", "DERIVADO A RRHH", "VENTA DE REPUESTOS"]
 SIN_INTERES_REAL = ["SIN RESPUESTAS", "SIN INTERES"]
@@ -70,10 +72,12 @@ def _pct(n: float, total: float) -> float:
 
 
 def class_table(df: pd.DataFrame) -> pd.DataFrame:
-    """[Clasificación | Cantidad | Porcentaje | Descripción], de mayor a menor
-    ("Porcentaje" con el nombre completo para que la columna tenga ancho)."""
+    """[Clasificación | Cantidad | Porcentaje | Descripción] en el orden fijo de
+    ``CLASS_ORDER`` (sólo las que tienen consultas; las desconocidas al final).
+    "Porcentaje" con el nombre completo para que la columna tenga ancho."""
     counts = df["Clasificacion interna"].astype(str).value_counts()
-    order = counts.index.tolist()
+    order = [c for c in CLASS_ORDER if c in counts] + \
+        [c for c in counts.index if c not in CLASS_ORDER]
     total = int(counts.sum())
     return pd.DataFrame({
         "Clasificación": order,
@@ -181,7 +185,8 @@ def md_table(df: pd.DataFrame, pct_cols: tuple[str, ...] = (),
     lines = ["| " + " | ".join(cols) + " |",
              "|" + "|".join("---:" if n else "---" for n in numeric) + "|"]
     for row in df.itertuples(index=False):
-        cells = [pct_label(v) if c in pct_cols else _cell(v) for c, v in zip(cols, row)]
+        cells = [("—" if pd.isna(v) else pct_label(v)) if c in pct_cols else _cell(v)
+                 for c, v in zip(cols, row)]
         lines.append("| " + " | ".join(cells) + " |")
     if total_row:
         lines.append("| " + " | ".join(f"**{total_row[c]}**" if c in total_row else ""
@@ -189,20 +194,51 @@ def md_table(df: pd.DataFrame, pct_cols: tuple[str, ...] = (),
     return "\n".join(lines)
 
 
-def _img(name: str, alt: str) -> str:
-    return f"![{alt}](img/{name})"
+def chart_names(year_month: str) -> dict[str, str]:
+    """Nombre del PNG que descarga la app para cada gráfico del informe
+    (mismos nombres que usan las páginas: ``clasificaciones_2026-10``,
+    ``negocios_por_fuente_01-10-26_a_31-10-26``, ...)."""
+    label = periods.range_label(*periods.month_bounds(year_month))
+    return {
+        "clasificacion": f"clasificaciones_{year_month}.png",
+        "embudo": f"embudo_{year_month}.png",
+        "fuentes": f"negocios_por_fuente_{label}.png",
+        "provincias": f"provincias_negocios_{label}.png",
+        "motivos": f"motivos_baja_{label}.png",
+        "fuentes_etapa": f"fuentes_etapa_{label}.png",
+        "maquinas": f"demanda_productos_{label}.png",
+    }
+
+
+def _img(name: str, alt: str, where: str) -> list[str]:
+    """Enlace a la imagen y, como comentario de Obsidian (no se ve al leer
+    ni al exportar), de qué tarjeta de la app descargarla."""
+    return [f"![{alt}](img/{name})", f"%% Descargar de: {where} %%"]
 
 
 def _list_es(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " y " + items[-1]
 
 
-def build(bot: pd.DataFrame, deals: pd.DataFrame, year_month: str
-          ) -> tuple[str, dict[str, bytes]]:
-    """(Markdown del informe, {nombre: PNG}) del mes."""
+def funnel_table(counts: list[int]) -> pd.DataFrame:
+    """[Etapa | Cantidad | % de las consultas | % de la etapa anterior]."""
+    first = counts[0]
+    return pd.DataFrame({
+        "Etapa": funnel.STAGES,
+        "Cantidad": counts,
+        "% de las consultas": [_pct(c, first) for c in counts],
+        "% de la etapa anterior": [None] + [_pct(c, p) if p else None
+                                            for p, c in zip(counts, counts[1:])],
+    })
+
+
+def build(bot: pd.DataFrame, deals: pd.DataFrame, year_month: str,
+          funnel_counts: list[int] | None = None) -> str:
+    """Markdown del informe del mes. ``funnel_counts``: etapas del embudo
+    (``funnel.funnel_counts``); sin ellas no va la 1.2."""
     month_txt = periods.month_label(year_month, full=True)
     d = month_deals(deals, year_month)
-    images: dict[str, bytes] = {}
+    img = chart_names(year_month)
     month_name = month_txt.split()[0].lower()
     out: list[str] = [f"# REPORTE DE ACTIVIDAD COMERCIAL - {month_txt.upper()}", ""]
 
@@ -251,10 +287,8 @@ def build(bot: pd.DataFrame, deals: pd.DataFrame, year_month: str
             f"durante el mes de {month_name}.", "",
             "### 1.1 Calidad del tráfico inicial", ""]
     if n_bot:
-        images["01_calidad_consultas.png"] = informe_img.hbar(
-            classes["Clasificación"].tolist(), classes["Cantidad"].tolist(),
-            [CLASSIFICATION_COLORS.get(c, "#BDC3C7") for c in classes["Clasificación"]])
-        out += [_img("01_calidad_consultas.png", "Calidad de las consultas"), "",
+        out += [*_img(img["clasificacion"], "Calidad de las consultas",
+                      "Reporte mensual · Por clasificación (barras)"), "",
                 md_table(classes, pct_cols=("Porcentaje",),
                          total_row={"Clasificación": "TOTAL", "Cantidad": n_bot}), "",
                 f"> [!note] Filtro previo\n> El {pct_label(_pct(n_sin_interes + n_incompatible, n_bot))} "
@@ -262,19 +296,33 @@ def build(bot: pd.DataFrame, deals: pd.DataFrame, year_month: str
     else:
         out += ["Sin consultas en el mes.", ""]
 
+    if funnel_counts and funnel_counts[0]:
+        ganadas = funnel_counts[-1]
+        out += ["### 1.2 De la consulta a la venta", "",
+                *_img(img["embudo"], "Embudo de consultas",
+                      "Análisis preliminar · Embudo de consultas"), "",
+                md_table(funnel_table(funnel_counts),
+                         pct_cols=("% de las consultas", "% de la etapa anterior")), "",
+                "> [!note] Cómo se cruzan consultas y negocios",
+                "> Las consultas derivadas se buscan por teléfono entre los negocios con "
+                "actividad en el mes o en el siguiente; si hay varios, cuenta el más avanzado. "
+                "**Cotizadas:** el negocio llegó a \"Cotizado aguardando devolución\" o más "
+                "(un perdido cuenta si se perdió después de cotizar). **Ganadas:** \"Ganado en "
+                "Desarrollo\" o \"Cerrado Ganado\".", "",
+                f"- *(Completar: el {pct_label(_pct(ganadas, funnel_counts[0]))} de las "
+                "consultas terminó en venta; dónde está la caída más grande.)*", ""]
+
     if not n_deals:
         out += ["## 2. Fuentes de origen (pipeline Bitrix)", "",
                 "Sin negocios de Bitrix en el mes.", ""]
-        return "\n".join(out), images
+        return "\n".join(out)
 
     # --- 2. Fuentes ------------------------------------------------------------
     out += ["## 2. Fuentes de origen (pipeline Bitrix)", "",
             f"Se crearon **{n_deals} negocios** de venta de máquinas en {month_name}.", "",
             "### 2.1 Distribución por canales", ""]
-    images["02_fuentes.png"] = informe_img.hbar(
-        sources["Fuente"].tolist(), sources["Cantidad"].tolist(),
-        [source_color(s) for s in sources["Fuente"]])
-    out += [_img("02_fuentes.png", "Negocios por fuente"), "",
+    out += [*_img(img["fuentes"], "Negocios por fuente",
+                  "Negocios Bitrix24 (período Mes) · Por fuente (barras sólidas)"), "",
             md_table(sources, pct_cols=("%",),
                      total_row={"Fuente": "TOTAL", "Cantidad": n_deals}), ""]
 
@@ -282,13 +330,11 @@ def build(bot: pd.DataFrame, deals: pd.DataFrame, year_month: str
     if others:
         zones["Provincia"] = zones["Provincia"].replace(
             geo.OTHERS, f"Otras ({', '.join(others)})")
-    map_png = informe_img.province_map(geo.zone_counts(d["Zona"], threshold=0)
-                                       .set_index("Zona")["Cantidad"].to_dict())
     out += ["### 2.2 Distribución geográfica", "",
-            "A partir del código de área del teléfono de los negocios:", ""]
-    if map_png:
-        images["03_provincias.png"] = map_png
-        out += [_img("03_provincias.png", "Negocios por provincia"), ""]
+            "A partir del código de área del teléfono de los negocios:", "",
+            *_img(img["provincias"], "Negocios por provincia",
+                  "Negocios Bitrix24 · Por provincia (vista barras; el mapa no se "
+                  "descarga, se puede reemplazar por una captura)"), ""]
     top3 = zones[~zones["Provincia"].isin(geo.NON_PROVINCE_ZONES)
                  & ~zones["Provincia"].str.startswith("Otras")].head(3)
     out += [md_table(zones, pct_cols=("%",)), "",
@@ -303,36 +349,26 @@ def build(bot: pd.DataFrame, deals: pd.DataFrame, year_month: str
             f"A la fecha de corte, hay **{n_lost} negocios en etapa \"Cerrado Perdido\"** "
             f"({pct_label(_pct(n_lost, n_deals))}).", ""]
     if n_lost:
-        images["04_motivos_baja.png"] = informe_img.donut(
-            motivos["Motivo de baja"].tolist(), motivos["Cantidad"].tolist(),
-            [COTEAR_GRAY if m == NO_MOTIVO else motivo_color(m)
-             for m in motivos["Motivo de baja"]])
-        out += [_img("04_motivos_baja.png", "Motivos de baja"), "",
+        out += [*_img(img["motivos"], "Motivos de baja",
+                      "Negocios Bitrix24 · Motivos de baja (torta)"), "",
                 md_table(motivos, pct_cols=("% sobre perdidos",)), "",
                 "> [!warning] Abandono",
                 f"> Los negocios cerrados por falta de respuesta o sin respuesta inicial "
                 f"agrupan el **{pct_label(_pct(no_resp, n_lost))}** de las pérdidas.", ""]
 
     eff = efficiency_table(d)
-    images["05_eficiencia_fuente.png"] = informe_img.stacked_columns(
-        eff["Fuente"].tolist(),
-        [("En desarrollo", eff["En desarrollo"].tolist(), COTEAR_BLUE),
-         ("Perdidos", eff["Perdidos"].tolist(), informe_img.LOST_RED)],
-        y_name="Negocios")
     out += ["### 3.2 Eficiencia por fuente de origen", "",
-            _img("05_eficiencia_fuente.png", "Eficiencia por fuente"), "",
+            *_img(img["fuentes_etapa"], "Negocios por fuente y etapa",
+                  "Negocios Bitrix24 · Por fuente (barras segmentadas por etapa)"), "",
             md_table(eff, pct_cols=("Tasa de pérdida",)), "",
             "**Observaciones:**", "",
             "- *(Completar: qué canales pierden más y cuáles tienen mejor efectividad.)*",
             "", "---", ""]
 
     # --- 4. Demanda ------------------------------------------------------------
-    images["06_demanda_productos.png"] = informe_img.hbar(
-        machines["Tipo de máquina"].tolist(), machines["Cantidad"].tolist(),
-        [COTEAR_GRAY if m == MACHINE_OTHER else COTEAR_BLUE
-         for m in machines["Tipo de máquina"]])
     out += ["## 4. Demanda de productos", "",
-            _img("06_demanda_productos.png", "Demanda por tipo de máquina"), "",
+            *_img(img["maquinas"], "Demanda por tipo de máquina",
+                  "Negocios Bitrix24 · Por máquina y etapa (Total)"), "",
             md_table(machines, pct_cols=("%",),
                      total_row={"Tipo de máquina": "TOTAL", "Cantidad": n_deals}), "",
             "> Tipo de máquina según el nombre del negocio. "
@@ -341,11 +377,7 @@ def build(bot: pd.DataFrame, deals: pd.DataFrame, year_month: str
 
     # --- 5. Estado actual --------------------------------------------------------
     stages = stage_table(d)
-    images["07_pipeline.png"] = informe_img.hbar(
-        stages["Etapa"].tolist(), stages["Cantidad"].tolist(),
-        [BITRIX_STAGE_COLORS.get(s, "#BDC3C7") for s in stages["Etapa"]])
     out += ["## 5. Estado actual", "", "### 5.1 Vista general del pipeline (Bitrix)", "",
-            _img("07_pipeline.png", "Negocios por etapa"), "",
             md_table(stages, pct_cols=("%",),
                      total_row={"Etapa": "TOTAL", "Cantidad": n_deals}), "",
             "> [!note] Acumulación",
@@ -353,27 +385,15 @@ def build(bot: pd.DataFrame, deals: pd.DataFrame, year_month: str
             "ya terminó en negocio perdido.", "",
             "## Recomendaciones finales", "",
             "1. *(Completar)*", "2. *(Completar)*", "3. *(Completar)*", ""]
-    return "\n".join(out), images
+    return "\n".join(out)
 
 
-def file_stem(year_month: str) -> str:
-    return f"Reporte de actividad {year_month}"
+def file_name(year_month: str) -> str:
+    return f"Reporte de actividad {year_month}.md"
 
 
-def build_zip(bot: pd.DataFrame, deals: pd.DataFrame, year_month: str) -> bytes:
-    """ZIP con ``informe_YYYY-MM/<informe>.md`` y ``informe_YYYY-MM/img/*.png``."""
-    md, images = build(bot, deals, year_month)
-    root = f"informe_{year_month}"
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(f"{root}/{file_stem(year_month)}.md", md.encode("utf-8"))
-        for name, png in images.items():
-            z.writestr(f"{root}/img/{name}", png)
-    return buf.getvalue()
-
-
-def zip_builder(bot: pd.DataFrame, deals: pd.DataFrame, year_month: str
-                ) -> Callable[[], bytes]:
-    """Función sin argumentos para ``st.download_button`` (arma el ZIP recién
+def md_builder(bot: pd.DataFrame, deals: pd.DataFrame, year_month: str,
+               funnel_counts: list[int] | None = None) -> Callable[[], bytes]:
+    """Función sin argumentos para ``st.download_button`` (arma la nota recién
     al hacer clic)."""
-    return lambda: build_zip(bot, deals, year_month)
+    return lambda: build(bot, deals, year_month, funnel_counts).encode("utf-8")

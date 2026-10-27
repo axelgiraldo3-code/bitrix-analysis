@@ -52,6 +52,8 @@ Una columna por tipo de máquina, dividida según la etapa actual de sus negocio
 
 Con la opción Porcentaje, cada columna suma 100 %. Así se puede comparar qué proporción de cada tipo avanzó o se perdió, aunque las cantidades sean muy distintas.
 
+La opción Total muestra sólo la cantidad de negocios de cada tipo, sin dividir por etapa. Es el gráfico de demanda de productos del informe mensual.
+
 ### Motivos de baja
 
 Distribución de los motivos cargados en los negocios perdidos. Es la principal referencia para entender por qué no se concretan las ventas.
@@ -61,6 +63,8 @@ Distribución de los motivos cargados en los negocios perdidos. Es la principal 
 ### Por fuente
 
 Cantidad de negocios de cada fuente, de mayor a menor. Sólo aparecen las fuentes con al menos un negocio.
+
+El selector cambia a barras segmentadas: cada fuente se divide según la etapa en la que están hoy sus negocios. Sirve para comparar qué canales traen negocios que avanzan y cuáles se pierden.
 
 ### Por provincia
 

@@ -14,6 +14,8 @@ from .branding import _plain
 DERIVADO = "DERIVADO A BITRIX"
 
 STAGES = ["Consultas del mes", "Derivadas a Bitrix", "Cotizadas", "Ganadas"]
+# Colores de cada etapa (de claro a azul Cotear; ganadas en verde)
+COLORS = ["#9DB9D6", "#4F80B5", "#01498E", "#11734B"]
 
 # Avance de cada etapa de Bitrix (texto sin tildes ni mayúsculas, por prefijo)
 _RANK = [
