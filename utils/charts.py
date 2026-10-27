@@ -192,8 +192,10 @@ def hbar(names: Sequence[str], values: Sequence[float], colors: Sequence[str] | 
 
 def stacked_bars(categories: Sequence[str], series: Sequence[tuple[str, Sequence[float], str]],
                  filename: str, *, y_name: str = "", percent: bool = False,
-                 rotate: int = 0, width: int = 720, label_width: int = 110) -> dict:
+                 rotate: int = 0, width: int = 720, label_width: int = 110,
+                 horizontal: bool = False) -> dict:
     """Columnas apiladas. ``series`` = [(nombre, valores, color), ...].
+    ``horizontal``: barras horizontales con la primera categoría arriba.
     Los segmentos en 0 no muestran etiqueta. En porcentaje, etiquetas y
     tooltip van armados por segmento ("33,3 %"): las plantillas de ECharts
     no admiten coma decimal."""
@@ -226,19 +228,25 @@ def stacked_bars(categories: Sequence[str], series: Sequence[tuple[str, Sequence
         })
     tooltip = {"trigger": "item", "confine": True} if percent else \
         {"trigger": "axis", "confine": True, "axisPointer": {"type": "shadow"}}
+    cat_axis = {"type": "category", "data": [str(c) for c in categories],
+                "axisTick": {"show": False},
+                "axisLine": {"lineStyle": {"color": "#D5DBE1"}},
+                "axisLabel": {"color": TEXT, "rotate": rotate, "interval": 0,
+                              "width": label_width, "overflow": "truncate"},
+                "tooltip": {"show": True}}
+    value_axis = _value_axis(y_name, percent)
+    if horizontal:
+        cat_axis.update(inverse=True, axisLine={"show": False})
+        for serie in out_series:
+            serie["barMaxWidth"] = 22
     return {
         **_base(filename),
         "tooltip": tooltip,
         "legend": _legend(type="plain", bottom=0, left="center"),
         "grid": {"left": 8, "right": 16, "top": 36, "containLabel": True,
                  "bottom": legend_rows([n for n, _, _ in series], width - 16) * 22 + 12},
-        "xAxis": {"type": "category", "data": [str(c) for c in categories],
-                  "axisTick": {"show": False},
-                  "axisLine": {"lineStyle": {"color": "#D5DBE1"}},
-                  "axisLabel": {"color": TEXT, "rotate": rotate, "interval": 0,
-                                "width": label_width, "overflow": "truncate"},
-                  "tooltip": {"show": True}},
-        "yAxis": _value_axis(y_name, percent),
+        "xAxis": value_axis if horizontal else cat_axis,
+        "yAxis": cat_axis if horizontal else value_axis,
         "series": out_series,
     }
 

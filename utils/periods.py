@@ -89,6 +89,11 @@ def previous_period(start: date, end: date, kind: str) -> tuple[date, date]:
     return prev_end - timedelta(days=days - 1), prev_end
 
 
+def range_label(start: date, end: date) -> str:
+    """Rango para nombres de archivo: '01-10-26_a_31-10-26'."""
+    return f"{start.strftime('%d-%m-%y')}_a_{end.strftime('%d-%m-%y')}"
+
+
 MONTHS_ES = ["ene", "feb", "mar", "abr", "may", "jun",
              "jul", "ago", "sep", "oct", "nov", "dic"]
 MONTHS_ES_FULL = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
