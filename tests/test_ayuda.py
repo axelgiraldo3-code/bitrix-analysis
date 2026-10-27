@@ -1,4 +1,5 @@
 """Pruebas de la Ayuda: conversión de notas estilo Obsidian y contenido de docs/ayuda."""
+
 import re
 
 import pytest
@@ -15,15 +16,21 @@ def test_slug_and_anchor():
 
 def test_render_wikilinks():
     out = notas.render("Ver [[Reporte mensual]] y [[Origen de los datos#Clasificación|esto]].", {})
-    assert out == ("Ver [Reporte mensual](#nota-reporte-mensual) y "
-                   "[esto](#nota-origen-de-los-datos).")
+    assert out == (
+        "Ver [Reporte mensual](#nota-reporte-mensual) y [esto](#nota-origen-de-los-datos)."
+    )
 
 
 def test_render_placeholders_headings_callouts():
     text = "## Título\n### Sub\nCada {{dias}} días, {{otro}}.\n> [!info] Ojo\n> texto"
     out = notas.render(text, {"dias": 7})
-    assert out.splitlines() == ["#### Título", "##### Sub", "Cada 7 días, {{otro}}.",
-                                "> **Ojo**", "> texto"]
+    assert out.splitlines() == [
+        "#### Título",
+        "##### Sub",
+        "Cada 7 días, {{otro}}.",
+        "> **Ojo**",
+        "> texto",
+    ]
 
 
 def test_order_follows_index_then_rest():

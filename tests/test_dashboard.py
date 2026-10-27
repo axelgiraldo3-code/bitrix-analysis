@@ -1,4 +1,5 @@
 """Pruebas de las funciones puras del dashboard: períodos, KPIs y gráficos."""
+
 import json
 from datetime import date
 
@@ -9,21 +10,33 @@ from utils import charts, kpis, periods
 
 
 # --- períodos -----------------------------------------------------------------
-@pytest.mark.parametrize("ym, delta, expected", [
-    ("2026-10", -1, "2026-09"), ("2026-01", -1, "2025-12"), ("2026-12", 1, "2027-01"),
-])
+@pytest.mark.parametrize(
+    "ym, delta, expected",
+    [
+        ("2026-10", -1, "2026-09"),
+        ("2026-01", -1, "2025-12"),
+        ("2026-12", 1, "2027-01"),
+    ],
+)
 def test_shift_months(ym, delta, expected):
     assert periods.shift_months(ym, delta) == expected
 
 
-@pytest.mark.parametrize("start, end, kind, expected", [
-    (date(2026, 10, 1), date(2026, 10, 31), "Mes", (date(2026, 9, 1), date(2026, 9, 30))),
-    (date(2026, 1, 1), date(2026, 3, 31), "Trimestre", (date(2025, 10, 1), date(2025, 12, 31))),
-    (date(2026, 7, 1), date(2026, 9, 30), "Trimestre", (date(2026, 4, 1), date(2026, 6, 30))),
-    (date(2026, 1, 1), date(2026, 12, 31), "Año", (date(2025, 1, 1), date(2025, 12, 31))),
-    (date(2026, 10, 5), date(2026, 10, 14), "Rango personalizado",
-     (date(2026, 9, 25), date(2026, 10, 4))),
-])
+@pytest.mark.parametrize(
+    "start, end, kind, expected",
+    [
+        (date(2026, 10, 1), date(2026, 10, 31), "Mes", (date(2026, 9, 1), date(2026, 9, 30))),
+        (date(2026, 1, 1), date(2026, 3, 31), "Trimestre", (date(2025, 10, 1), date(2025, 12, 31))),
+        (date(2026, 7, 1), date(2026, 9, 30), "Trimestre", (date(2026, 4, 1), date(2026, 6, 30))),
+        (date(2026, 1, 1), date(2026, 12, 31), "Año", (date(2025, 1, 1), date(2025, 12, 31))),
+        (
+            date(2026, 10, 5),
+            date(2026, 10, 14),
+            "Rango personalizado",
+            (date(2026, 9, 25), date(2026, 10, 4)),
+        ),
+    ],
+)
 def test_previous_period(start, end, kind, expected):
     assert periods.previous_period(start, end, kind) == expected
 
@@ -51,17 +64,25 @@ def test_delta_zero_and_missing_previous():
 
 
 def test_category_kpi_reports_previous_leader():
-    top, kw = kpis.category_kwargs(pd.Series(["Córdoba"] * 3 + ["Salta"]),
-                                   pd.Series(["Salta"] * 2 + ["Córdoba"]),
-                                   kpis.UP_GOOD, "consultas")
+    top, kw = kpis.category_kwargs(
+        pd.Series(["Córdoba"] * 3 + ["Salta"]),
+        pd.Series(["Salta"] * 2 + ["Córdoba"]),
+        kpis.UP_GOOD,
+        "consultas",
+    )
     assert top == "Córdoba"
     assert kw["delta"] == "+2"
     assert kw["delta_description"] == "3 consultas · antes Salta"
 
 
 def test_category_kpi_excludes_non_provinces():
-    top, _ = kpis.category_kwargs(pd.Series(["Extranjero"] * 5 + ["Salta"]), None,
-                                  kpis.UP_GOOD, "consultas", exclude={"Extranjero"})
+    top, _ = kpis.category_kwargs(
+        pd.Series(["Extranjero"] * 5 + ["Salta"]),
+        None,
+        kpis.UP_GOOD,
+        "consultas",
+        exclude={"Extranjero"},
+    )
     assert top == "Salta"
 
 
@@ -73,7 +94,7 @@ def test_charts_are_json_and_have_png_export():
         charts.stacked_bars(["x", "y"], [("A", [1, 0], "#01498E")], "f"),
     ]
     for opt in opts:
-        json.dumps(opt)   # st.echarts_chart sólo acepta opciones JSON
+        json.dumps(opt)  # st.echarts_chart sólo acepta opciones JSON
         assert opt["toolbox"]["feature"]["saveAsImage"]["name"] == "f"
         assert "dataZoom" not in opt
 
@@ -92,13 +113,14 @@ def test_stacked_bars_hide_zero_labels():
 def test_stacked_bars_no_white_border_and_hide_thin_labels():
     opt = charts.stacked_bars(["x"], [("A", [60], "#01498E"), ("B", [1], "#B10202")], "f")
     assert all("borderColor" not in s["itemStyle"] for s in opt["series"])
-    assert opt["series"][1]["data"][0]["label"] == {"show": False}   # 1 de 61: muy fino
+    assert opt["series"][1]["data"][0]["label"] == {"show": False}  # 1 de 61: muy fino
     assert "label" not in opt["series"][0]["data"][0]
 
 
 def test_hbar_orders_largest_on_top():
     opt = charts.hbar(["Grande", "Chico"], [9, 1], "#01498E", "f")
-    assert opt["yAxis"]["data"] == ["Chico", "Grande"]   # ECharts dibuja de abajo hacia arriba
+    assert opt["yAxis"]["data"] == ["Chico", "Grande"]  # ECharts dibuja de abajo hacia arriba
+
 
 # --- cuota de Google Sheets y caché por antigüedad ----------------------------
 def _quota_error():
@@ -109,27 +131,36 @@ def _quota_error():
         text = "Quota exceeded"
 
         def json(self):
-            return {"error": {"code": 429, "message": "Quota exceeded",
-                              "status": "RESOURCE_EXHAUSTED"}}
+            return {
+                "error": {"code": 429, "message": "Quota exceeded", "status": "RESOURCE_EXHAUSTED"}
+            }
 
     return gspread.exceptions.APIError(_Resp())
 
 
 def test_is_quota_error():
     from utils import sheets
+
     assert sheets.is_quota_error(_quota_error())
     assert not sheets.is_quota_error(ValueError("429"))
 
 
 def test_read_months_batch_splits_past_and_current(monkeypatch):
     from utils import sheets
+
     now = date.today()
     current = f"{now.year:04d}-{now.month:02d}"
     calls = {}
-    monkeypatch.setattr(sheets, "_read_batch_past",
-                        lambda yms, kind: calls.setdefault("past", yms) and {y: y for y in yms})
-    monkeypatch.setattr(sheets, "_read_batch_current",
-                        lambda yms, kind: calls.setdefault("current", yms) and {y: y for y in yms})
+    monkeypatch.setattr(
+        sheets,
+        "_read_batch_past",
+        lambda yms, kind: calls.setdefault("past", yms) and {y: y for y in yms},
+    )
+    monkeypatch.setattr(
+        sheets,
+        "_read_batch_current",
+        lambda yms, kind: calls.setdefault("current", yms) and {y: y for y in yms},
+    )
     out = sheets.read_months_batch(("2020-01", current), "Bitrix")
     assert calls == {"past": ("2020-01",), "current": (current,)}
     assert list(out) == ["2020-01", current]
@@ -148,17 +179,26 @@ def test_bitrix_period_quota_is_a_warning(monkeypatch):
     assert warns == [data.SHEETS_QUOTA_WARNING]
 
 
-@pytest.mark.parametrize("ym, days", [
-    ("2026-10", 7), ("2026-09", 7), ("2026-08", 30), ("2025-12", 30),
-])
+@pytest.mark.parametrize(
+    "ym, days",
+    [
+        ("2026-10", 7),
+        ("2026-09", 7),
+        ("2026-08", 30),
+        ("2025-12", 30),
+    ],
+)
 def test_snapshot_ttl_by_age(ym, days):
     from datetime import datetime
+
     from utils import data
+
     assert data.snapshot_ttl_days(ym, today=datetime(2026, 10, 25)) == days
 
 
 def test_snapshot_ttl_previous_month_across_year():
     from datetime import datetime
-    from utils import data
-    assert data.snapshot_ttl_days("2025-12", today=datetime(2026, 1, 5)) == 7
 
+    from utils import data
+
+    assert data.snapshot_ttl_days("2025-12", today=datetime(2026, 1, 5)) == 7

@@ -1,4 +1,5 @@
 """Análisis geográfico: conteo de zonas (provincias) y mapa coroplético."""
+
 from __future__ import annotations
 
 import json
@@ -44,8 +45,7 @@ def zone_counts(zones: pd.Series, threshold: float = 0.10) -> pd.DataFrame:
     out = counts.sort_values(ascending=False, kind="stable").reset_index()
     out.columns = ["Zona", "Cantidad"]
     # 'Otros' siempre al final
-    out = pd.concat([out[out["Zona"] != OTHERS], out[out["Zona"] == OTHERS]],
-                    ignore_index=True)
+    out = pd.concat([out[out["Zona"] != OTHERS], out[out["Zona"] == OTHERS]], ignore_index=True)
     out["%"] = (out["Cantidad"] / total * 100).round(1)
     return out
 
@@ -83,8 +83,9 @@ def _label_point(feature: dict) -> tuple[float, float]:
     return float(p["lon"]), float(p["lat"])
 
 
-def province_map(counts: pd.DataFrame, total: int, unit: str = "consultas",
-                 height: int = 520) -> go.Figure:
+def province_map(
+    counts: pd.DataFrame, total: int, unit: str = "consultas", height: int = 520
+) -> go.Figure:
     """Mapa coroplético de las provincias con datos.
 
     ``counts`` = [Zona, Cantidad] (sin agrupar en Otros). Sólo se dibujan las
@@ -103,35 +104,46 @@ def province_map(counts: pd.DataFrame, total: int, unit: str = "consultas",
     vmax = float(data["Cantidad"].max())
     vmin = 0.0
 
-    fig.add_trace(go.Choropleth(
-        geojson=geo,
-        locations=data["Zona"],
-        z=data["Cantidad"],
-        zmin=vmin, zmax=vmax,
-        colorscale=MAP_COLORSCALE,
-        marker_line_color="white",
-        marker_line_width=1,
-        customdata=[pct_label(v) for v in data["pct"]],
-        hovertemplate=(f"<b>%{{location}}</b><br>%{{z}} {unit}"
-                       "<br>%{customdata} del total<extra></extra>"),
-        colorbar=dict(title=dict(text=unit.capitalize()), thickness=12, len=0.6,
-                      tickformat="d", nticks=min(int(vmax) + 1, 6)),
-    ))
+    fig.add_trace(
+        go.Choropleth(
+            geojson=geo,
+            locations=data["Zona"],
+            z=data["Cantidad"],
+            zmin=vmin,
+            zmax=vmax,
+            colorscale=MAP_COLORSCALE,
+            marker_line_color="white",
+            marker_line_width=1,
+            customdata=[pct_label(v) for v in data["pct"]],
+            hovertemplate=(
+                f"<b>%{{location}}</b><br>%{{z}} {unit}<br>%{{customdata}} del total<extra></extra>"
+            ),
+            colorbar=dict(
+                title=dict(text=unit.capitalize()),
+                thickness=12,
+                len=0.6,
+                tickformat="d",
+                nticks=min(int(vmax) + 1, 6),
+            ),
+        )
+    )
 
     # Etiquetas de % en el punto interior de cada provincia. El color del texto
     # se adapta al fondo: blanco sobre azul, gris oscuro sobre gris.
     pts = [_label_point(features[z]) for z in data["Zona"]]
     shade = (data["Cantidad"] - vmin) / (vmax - vmin) if vmax > vmin else data["Cantidad"] * 0 + 1
     text_colors = ["white" if s >= 0.45 else "#2B2F33" for s in shade]
-    fig.add_trace(go.Scattergeo(
-        lon=[p[0] for p in pts],
-        lat=[p[1] for p in pts],
-        text=[pct_label(v) for v in data["pct"]],
-        mode="text",
-        textfont=dict(size=12, color=text_colors, family="sans-serif"),
-        hoverinfo="skip",
-        showlegend=False,
-    ))
+    fig.add_trace(
+        go.Scattergeo(
+            lon=[p[0] for p in pts],
+            lat=[p[1] for p in pts],
+            text=[pct_label(v) for v in data["pct"]],
+            mode="text",
+            textfont=dict(size=12, color=text_colors, family="sans-serif"),
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
 
     fig.update_geos(
         visible=False,

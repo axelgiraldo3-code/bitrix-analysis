@@ -8,9 +8,8 @@ Cada KPI tiene una polaridad:
 ``delta_kwargs`` devuelve los argumentos ``delta``, ``delta_color`` y
 ``delta_description`` listos para ``st.metric``.
 """
-from __future__ import annotations
 
-from typing import Optional
+from __future__ import annotations
 
 import pandas as pd
 
@@ -27,9 +26,16 @@ def _fmt_num(v: float, decimals: int) -> str:
     return f"{v:+.{decimals}f}".replace(".", ",") if decimals else f"{int(round(v)):+d}"
 
 
-def delta_kwargs(current: Optional[float], previous: Optional[float], polarity: str,
-                 *, vs: str = "", unit: str = "", decimals: int = 0,
-                 extra: str = "") -> dict:
+def delta_kwargs(
+    current: float | None,
+    previous: float | None,
+    polarity: str,
+    *,
+    vs: str = "",
+    unit: str = "",
+    decimals: int = 0,
+    extra: str = "",
+) -> dict:
     """Variación ``current - previous``.
 
     ``unit`` se agrega al número (ej. " p.p.", " días"); ``vs`` es el
@@ -37,8 +43,11 @@ def delta_kwargs(current: Optional[float], previous: Optional[float], polarity: 
     para la descripción (ej. "7 consultas · antes Córdoba").
     """
     if current is None or previous is None or pd.isna(current) or pd.isna(previous):
-        return {"delta": None, "delta_color": "off",
-                "delta_description": " · ".join(t for t in (extra, NO_PREVIOUS) if t) or None}
+        return {
+            "delta": None,
+            "delta_color": "off",
+            "delta_description": " · ".join(t for t in (extra, NO_PREVIOUS) if t) or None,
+        }
     diff = round(float(current) - float(previous), decimals)
     if diff == 0:
         delta: object = 0
@@ -59,8 +68,15 @@ def top_category(values: pd.Series, exclude: set[str] | None = None) -> tuple[st
     return str(vc.index[0]), int(vc.iloc[0])
 
 
-def category_kwargs(current: pd.Series, previous: Optional[pd.Series], polarity: str,
-                    unit: str, *, vs: str = "", exclude: set[str] | None = None) -> tuple[str, dict]:
+def category_kwargs(
+    current: pd.Series,
+    previous: pd.Series | None,
+    polarity: str,
+    unit: str,
+    *,
+    vs: str = "",
+    exclude: set[str] | None = None,
+) -> tuple[str, dict]:
     """KPI de categoría líder (provincia, área, fuente, motivo).
 
     Devuelve (valor a mostrar, kwargs de delta). La variación es la de la

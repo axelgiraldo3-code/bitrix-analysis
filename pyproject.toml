@@ -9,3 +9,4 @@ ignore = ["B905"]  # zip(strict=) agrega ruido sin beneficio en este código
 
 [tool.ruff.format]
 quote-style = "double"
+line-ending = "lf"

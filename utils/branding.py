@@ -1,4 +1,5 @@
 """Colores y utilidades de branding de Cotear SRL."""
+
 import hashlib
 import re
 import unicodedata
@@ -8,14 +9,14 @@ COTEAR_GRAY = "#7B868C"
 
 # Paleta para categorías de clasificación interna (10 slots)
 CLASSIFICATION_COLORS = {
-    "DERIVADO A BITRIX":      "#11734b",
-    "VENTA DE REPUESTOS":     "#0a53a8",
-    "DERIVADO A RRHH":        "#ee00ff",
-    "DERIVADO A TÉCNICA":     "#5a3286",
-    "SIN RESPUESTAS":         "#ffe5a0",
+    "DERIVADO A BITRIX": "#11734b",
+    "VENTA DE REPUESTOS": "#0a53a8",
+    "DERIVADO A RRHH": "#ee00ff",
+    "DERIVADO A TÉCNICA": "#5a3286",
+    "SIN RESPUESTAS": "#ffe5a0",
     "NECESIDAD INCOMPATIBLE": "#E67E22",
-    "SIN INTERES":            "#b10202",
-    "SIN CLASIFICAR":         "#BDC3C7",
+    "SIN INTERES": "#b10202",
+    "SIN CLASIFICAR": "#BDC3C7",
 }
 
 # Etapas de negocio Bitrix ordenadas
@@ -29,16 +30,16 @@ BITRIX_STAGE_ORDER = [
 ]
 
 BITRIX_STAGE_COLORS = {
-    "Pendiente de cotizar":            "#ace9fb",
-    "Cotizado aguardando devolución":  "#39a8ef",
-    "Cotizado aguardando devolucion":  "#39a8ef",
-    "En negociacion":                  "#55d0e0",
-    "En negociación":                  "#55d0e0",
-    "Ganado en Desarrollo":            "#47e4c2",
-    "Ganado en desarrollo":            "#47e4c2",
-    "Cerrado Ganado":                  "#7bd500",
-    "Cerrado Perdido, motivo?":                 "#f11716",
-    "Cerrado Perdido":                 "#f11716",
+    "Pendiente de cotizar": "#ace9fb",
+    "Cotizado aguardando devolución": "#39a8ef",
+    "Cotizado aguardando devolucion": "#39a8ef",
+    "En negociacion": "#55d0e0",
+    "En negociación": "#55d0e0",
+    "Ganado en Desarrollo": "#47e4c2",
+    "Ganado en desarrollo": "#47e4c2",
+    "Cerrado Ganado": "#7bd500",
+    "Cerrado Perdido, motivo?": "#f11716",
+    "Cerrado Perdido": "#f11716",
 }
 
 
@@ -63,17 +64,17 @@ SOURCE_ORDER = [
 ]
 
 SOURCE_COLORS = {
-    "RRSS":                    "#5A3286",
-    "Sitio Web":               "#01498E",
-    "WhatsApp":                "#11734B",
-    "Correo":                  "#E67E22",
-    "Por Recomendación":       "#C9A400",
-    "Llamada":                 "#39A8EF",
+    "RRSS": "#5A3286",
+    "Sitio Web": "#01498E",
+    "WhatsApp": "#11734B",
+    "Correo": "#E67E22",
+    "Por Recomendación": "#C9A400",
+    "Llamada": "#39A8EF",
     "Derivación de otra area": "#D35FB7",
-    "Cliente existente":       "#2BB3A3",
-    "Casa matriz":             "#B10202",
-    "Impulso de venta":        "#8E5B2E",
-    "Otro":                    "#34495E",
+    "Cliente existente": "#2BB3A3",
+    "Casa matriz": "#B10202",
+    "Impulso de venta": "#8E5B2E",
+    "Otro": "#34495E",
 }
 SOURCE_OTHER_COLOR = COTEAR_GRAY
 SOURCE_EMPTY = "Sin fuente"
@@ -86,24 +87,42 @@ def _plain(text: str) -> str:
 
 # Denominaciones alternativas (sin tildes, minúsculas) → fuente canónica
 _SOURCE_ALIASES = {
-    "rrss": "RRSS", "redes sociales": "RRSS", "redes": "RRSS", "instagram": "RRSS",
-    "facebook": "RRSS", "linkedin": "RRSS",
-    "sitio web": "Sitio Web", "web": "Sitio Web", "pagina web": "Sitio Web",
+    "rrss": "RRSS",
+    "redes sociales": "RRSS",
+    "redes": "RRSS",
+    "instagram": "RRSS",
+    "facebook": "RRSS",
+    "linkedin": "RRSS",
+    "sitio web": "Sitio Web",
+    "web": "Sitio Web",
+    "pagina web": "Sitio Web",
     "formulario web": "Sitio Web",
-    "whatsapp": "WhatsApp", "wsp": "WhatsApp", "whats app": "WhatsApp",
-    "correo": "Correo", "email": "Correo", "e-mail": "Correo", "mail": "Correo",
+    "whatsapp": "WhatsApp",
+    "wsp": "WhatsApp",
+    "whats app": "WhatsApp",
+    "correo": "Correo",
+    "email": "Correo",
+    "e-mail": "Correo",
+    "mail": "Correo",
     "correo electronico": "Correo",
-    "por recomendacion": "Por Recomendación", "recomendacion": "Por Recomendación",
+    "por recomendacion": "Por Recomendación",
+    "recomendacion": "Por Recomendación",
     "referido": "Por Recomendación",
-    "llamada": "Llamada", "llamado": "Llamada", "telefono": "Llamada",
+    "llamada": "Llamada",
+    "llamado": "Llamada",
+    "telefono": "Llamada",
     "callback": "Llamada",
     "derivacion de otra area": "Derivación de otra area",
     "derivacion de otra area interna": "Derivación de otra area",
     "derivado de otra area": "Derivación de otra area",
-    "cliente existente": "Cliente existente", "cliente actual": "Cliente existente",
+    "cliente existente": "Cliente existente",
+    "cliente actual": "Cliente existente",
     "casa matriz": "Casa matriz",
-    "impulso de venta": "Impulso de venta", "impulso de ventas": "Impulso de venta",
-    "otro": "Otro", "otros": "Otro", "other": "Otro",
+    "impulso de venta": "Impulso de venta",
+    "impulso de ventas": "Impulso de venta",
+    "otro": "Otro",
+    "otros": "Otro",
+    "other": "Otro",
 }
 
 
@@ -125,10 +144,10 @@ def source_color(name: str) -> str:
 # por el comienzo del texto.
 MOTIVO_COLORS = {
     "sin respuesta inicial": "#01498E",
-    "sin repuestas":         "#E67E22",
-    "precio alto":           "#11734B",
+    "sin repuestas": "#E67E22",
+    "precio alto": "#11734B",
     "necesidad de producto": "#39A8EF",
-    "sin interes real":      "#B10202",
+    "sin interes real": "#B10202",
 }
 # Motivos nuevos: color estable según el nombre (no según el orden del mes)
 _MOTIVO_SPARE = ["#5A3286", "#C9A400", "#2BB3A3", "#D35FB7", "#8E5B2E", "#34495E"]
@@ -150,4 +169,3 @@ def motivo_color(name: str) -> str:
             return color
     digest = int(hashlib.md5(key.encode("utf-8")).hexdigest(), 16)
     return _MOTIVO_SPARE[digest % len(_MOTIVO_SPARE)]
-

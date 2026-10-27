@@ -5,6 +5,7 @@ Uso:
 
 Salida: data/stages_map.json con {STAGE_ID: NAME} por pipeline.
 """
+
 from __future__ import annotations
 
 import json

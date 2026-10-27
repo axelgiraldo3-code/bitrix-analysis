@@ -1,15 +1,13 @@
 """Procesamiento y deduplicación de reportes del bot."""
+
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Iterable
-
 import re
+from datetime import datetime
 
 import pandas as pd
 
 from .phone_ar import format_ar, is_foreign, only_digits, province_of, significant_ar
-
 
 DERIVADO_BITRIX = "DERIVADO A BITRIX"
 DERIVADO_TECNICA = "DERIVADO A TÉCNICA"
@@ -70,11 +68,20 @@ def clean_source(raw: pd.DataFrame) -> pd.DataFrame:
         Clasificacion interna, Tipo de contacto, Zona, _dt (datetime), _phone_sig
     """
     if raw.empty:
-        return pd.DataFrame(columns=[
-            "Fecha", "Numero", "Nombre", "Area de interes",
-            "Resumen general", "Clasificacion interna", "Tipo de contacto",
-            "Zona", "_dt", "_phone_sig",
-        ])
+        return pd.DataFrame(
+            columns=[
+                "Fecha",
+                "Numero",
+                "Nombre",
+                "Area de interes",
+                "Resumen general",
+                "Clasificacion interna",
+                "Tipo de contacto",
+                "Zona",
+                "_dt",
+                "_phone_sig",
+            ]
+        )
 
     dt = raw["fecha_hora"].map(_parse_dt)
     fecha = [d.strftime("%d-%m-%y") if d else "" for d in dt]
@@ -88,24 +95,28 @@ def clean_source(raw: pd.DataFrame) -> pd.DataFrame:
     tipo = raw["tipo_contacto"].fillna("").astype(str).str.strip()
 
     # Resumen general: unir los 4 resúmenes por agente con '\n', omitiendo vacíos
-    resumen_cols = [c for c in ["resumen_1", "resumen_2", "resumen_3", "resumen_4"] if c in raw.columns]
+    resumen_cols = [
+        c for c in ["resumen_1", "resumen_2", "resumen_3", "resumen_4"] if c in raw.columns
+    ]
     resumenes = raw[resumen_cols].fillna("").astype(str)
     resumen_general = resumenes.apply(
         lambda row: "\n".join([x for x in (str(v).strip() for v in row) if x]), axis=1
     )
 
-    df = pd.DataFrame({
-        "Fecha": fecha,
-        "Numero": numero_fmt,
-        "Nombre": nombre,
-        "Area de interes": area,
-        "Resumen general": resumen_general,
-        "Clasificacion interna": "",
-        "Tipo de contacto": tipo,
-        "Zona": digits.map(province_of),
-        "_dt": dt,
-        "_phone_sig": phone_sig,
-    })
+    df = pd.DataFrame(
+        {
+            "Fecha": fecha,
+            "Numero": numero_fmt,
+            "Nombre": nombre,
+            "Area de interes": area,
+            "Resumen general": resumen_general,
+            "Clasificacion interna": "",
+            "Tipo de contacto": tipo,
+            "Zona": digits.map(province_of),
+            "_dt": dt,
+            "_phone_sig": phone_sig,
+        }
+    )
     return df
 
 
@@ -198,7 +209,9 @@ def apply_auto_rules(df: pd.DataFrame, bitrix_phone_sig: set[str]) -> pd.DataFra
 
     # 1) Números extranjeros -> SIN INTERES
     foreign_mask = out["Numero"].map(is_foreign) & (out["_phone_sig"] == "")
-    out.loc[foreign_mask & (out["Clasificacion interna"] == ""), "Clasificacion interna"] = SIN_INTERES
+    out.loc[foreign_mask & (out["Clasificacion interna"] == ""), "Clasificacion interna"] = (
+        SIN_INTERES
+    )
 
     # 2) Coincidencia con Bitrix -> DERIVADO A BITRIX
     if bitrix_phone_sig:
@@ -226,15 +239,20 @@ def overwrite_names_from_bitrix(df: pd.DataFrame, bitrix_df: pd.DataFrame) -> pd
     """
     if df.empty or bitrix_df.empty or "_phone_sig" not in bitrix_df.columns:
         return df
-    lookup = (bitrix_df[bitrix_df["_phone_sig"] != ""]
-              .drop_duplicates(subset=["_phone_sig"], keep="first")
-              .set_index("_phone_sig")["Cliente"].to_dict())
+    lookup = (
+        bitrix_df[bitrix_df["_phone_sig"] != ""]
+        .drop_duplicates(subset=["_phone_sig"], keep="first")
+        .set_index("_phone_sig")["Cliente"]
+        .to_dict()
+    )
     out = df.copy()
+
     def _pick(row):
         sig = row["_phone_sig"]
         if sig and sig in lookup and lookup[sig]:
             return lookup[sig]
         return row["Nombre"]
+
     out["Nombre"] = out.apply(_pick, axis=1)
     return out
 
@@ -266,7 +284,10 @@ def attach_deal_names(df: pd.DataFrame, lookup: pd.DataFrame) -> pd.DataFrame:
     if lookup.empty or "Negocio" not in lookup.columns:
         out["Negocio"] = ""
         return out
-    m = (lookup[lookup["_phone_sig"].astype(str) != ""]
-         .drop_duplicates("_phone_sig").set_index("_phone_sig")["Negocio"])
+    m = (
+        lookup[lookup["_phone_sig"].astype(str) != ""]
+        .drop_duplicates("_phone_sig")
+        .set_index("_phone_sig")["Negocio"]
+    )
     out["Negocio"] = out["_phone_sig"].astype(str).map(m).fillna("")
     return out

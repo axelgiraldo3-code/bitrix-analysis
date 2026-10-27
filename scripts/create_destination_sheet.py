@@ -12,6 +12,7 @@ Requiere que la service account de `[gcp_service_account]` tenga permiso para
 crear archivos en Drive; si no, crear el libro manualmente en Sheets y
 compartirlo con el `client_email` de la service account con permiso de Editor.
 """
+
 from __future__ import annotations
 
 import sys

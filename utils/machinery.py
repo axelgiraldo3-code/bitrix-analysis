@@ -18,12 +18,11 @@ agrupan en la categoría de la app:
   hidráulicas), Curvadoras (CNC, convencionales) y Rectificadoras (planas)
   → su categoría.
 """
+
 from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Optional
-
 
 OTHER = "Otro / Sin clasificar"
 
@@ -65,44 +64,75 @@ _PATTERNS: list[tuple[str, str]] = [
     # --- Otros cortes -------------------------------------------------------
     (r"\bplasma\b|\boxicorte\b|\bpantografo\b", "Cortadora CNC plasma"),
     (r"\bguillotina\b|\bcizalla\b|\bcizalladora\b", "Cortadora guillotina"),
-    (r"\b(sierra|cortadora|tronzadora)\b.*\b(disco|circular|sensitiva)\b"
-     r"|\b(disco|circular)\b.*\bcanos?\b|\btronzadora\b|\bsierra circular\b"
-     r"|\bcortadora de canos?\b", "Cortadora de caños a disco"),
+    (
+        r"\b(sierra|cortadora|tronzadora)\b.*\b(disco|circular|sensitiva)\b"
+        r"|\b(disco|circular)\b.*\bcanos?\b|\btronzadora\b|\bsierra circular\b"
+        r"|\bcortadora de canos?\b",
+        "Cortadora de caños a disco",
+    ),
     # --- Conformado ---------------------------------------------------------
-    (r"\bplegadora\b|\bplegado\b|\bpress ?brake\b|\bdobladora de chapas?\b"
-     r"|\bplegadora hidraulica\b", "Plegadora"),
-    (r"\bcurvadora\b|\bcurvado\b|\bdobladora( de)? (canos?|tubos?)\b"
-     r"|\bdobladora\b|\bcurvatubos?\b|\btube bender\b", "Curvadora de tubos"),
+    (
+        r"\bplegadora\b|\bplegado\b|\bpress ?brake\b|\bdobladora de chapas?\b"
+        r"|\bplegadora hidraulica\b",
+        "Plegadora",
+    ),
+    (
+        r"\bcurvadora\b|\bcurvado\b|\bdobladora( de)? (canos?|tubos?)\b"
+        r"|\bdobladora\b|\bcurvatubos?\b|\btube bender\b",
+        "Curvadora de tubos",
+    ),
     # --- Soldadura ----------------------------------------------------------
-    (r"\bsoldad|\bsoldar\b|\brobot(ica)? de soldadura\b|\bsoldadora\b",
-     "Sistema de soldadura automática"),
+    (
+        r"\bsoldad|\bsoldar\b|\brobot(ica)? de soldadura\b|\bsoldadora\b",
+        "Sistema de soldadura automática",
+    ),
     # --- Arranque de viruta -------------------------------------------------
-    (r"\balesadora\b|\balesado\b|\bmandr(in|il)adora\b|\bmandrinado\b"
-     r"|\bboring (mill|machine)\b", "Alesadora"),
+    (
+        r"\balesadora\b|\balesado\b|\bmandr(in|il)adora\b|\bmandrinado\b"
+        r"|\bboring (mill|machine)\b",
+        "Alesadora",
+    ),
     (r"\bmortajadora\b|\bmortajado\b|\bmortaja\b", "Mortajadora"),
     (r"\bbrochad(ora|o)\b|\bbrochar\b|\bbroaching\b", "Brochadora"),
-    (r"\brectificadora\b|\brectificado\b|\bamoladora (plana|de precision)\b"
-     r"|\bgrinder\b", "Rectificadora CNC"),
-    (r"\bperforad(o|ora|ora radial)\b|\bcentro de perforad|\btaladro\b"
-     r"|\bagujereadora\b|\btaladro radial\b|\bdrill tap\b|\btapping center\b"
-     r"|\bdrilling and tapping\b", "Centro de perforado"),
+    (
+        r"\brectificadora\b|\brectificado\b|\bamoladora (plana|de precision)\b"
+        r"|\bgrinder\b",
+        "Rectificadora CNC",
+    ),
+    (
+        r"\bperforad(o|ora|ora radial)\b|\bcentro de perforad|\btaladro\b"
+        r"|\bagujereadora\b|\btaladro radial\b|\bdrill tap\b|\btapping center\b"
+        r"|\bdrilling and tapping\b",
+        "Centro de perforado",
+    ),
     # Torneado antes que mecanizado: "centro de torneado" es un torno CNC.
     # "Torno petrolero" / "roscador" es CNC salvo que diga convencional o manual.
-    (r"\bcentro (de )?torneado\b|\btorneado\b.*\bcnc\b|\btorno\b.*\bcnc\b"
-     r"|\bcnc\b.*\btorno\b|\btorno (automatico|suizo|swiss)\b|\bswiss type\b"
-     r"|\btipo suizo\b|\btorno vertical\b|\bvtl\b|\bvertical turning\b"
-     r"|\btorno de carrusel\b|\btorno a control numerico\b|\bslant bed\b"
-     r"|\bbancada inclinada\b|\btorno multitareas?\b|\bcabezal movil\b"
-     r"|\bpipe threading\b"
-     r"|\btorno (petrolero|roscador)\b(?!.*\b(convencional|manual)\b)",
-     "Torno CNC"),
-    (r"\bcentro (de )?(mecanizad|maquinad)|\bmecanizado (vertical|horizontal)\b"
-     r"|\b(vmc|hmc|cmv)\b|\bcentro (vertical|horizontal)\b|\b5 ejes\b"
-     r"|\bcinco ejes\b|\b5 axis\b|\bmachining center\b", "Centro de mecanizado"),
-    (r"\b(fresadora|fresa|milling)\b.*\bcnc\b|\bcnc\b.*\b(fresadora|fresa|milling)\b"
-     r"|\bfresadora a control numerico\b|\brouter\b", "Fresadora CNC"),
-    (r"\bfresadora\b|\bfresa universal\b|\bfresadora universal\b"
-     r"|\bmilling machine\b|\bbridgeport\b", "Fresadora convencional"),
+    (
+        r"\bcentro (de )?torneado\b|\btorneado\b.*\bcnc\b|\btorno\b.*\bcnc\b"
+        r"|\bcnc\b.*\btorno\b|\btorno (automatico|suizo|swiss)\b|\bswiss type\b"
+        r"|\btipo suizo\b|\btorno vertical\b|\bvtl\b|\bvertical turning\b"
+        r"|\btorno de carrusel\b|\btorno a control numerico\b|\bslant bed\b"
+        r"|\bbancada inclinada\b|\btorno multitareas?\b|\bcabezal movil\b"
+        r"|\bpipe threading\b"
+        r"|\btorno (petrolero|roscador)\b(?!.*\b(convencional|manual)\b)",
+        "Torno CNC",
+    ),
+    (
+        r"\bcentro (de )?(mecanizad|maquinad)|\bmecanizado (vertical|horizontal)\b"
+        r"|\b(vmc|hmc|cmv)\b|\bcentro (vertical|horizontal)\b|\b5 ejes\b"
+        r"|\bcinco ejes\b|\b5 axis\b|\bmachining center\b",
+        "Centro de mecanizado",
+    ),
+    (
+        r"\b(fresadora|fresa|milling)\b.*\bcnc\b|\bcnc\b.*\b(fresadora|fresa|milling)\b"
+        r"|\bfresadora a control numerico\b|\brouter\b",
+        "Fresadora CNC",
+    ),
+    (
+        r"\bfresadora\b|\bfresa universal\b|\bfresadora universal\b"
+        r"|\bmilling machine\b|\bbridgeport\b",
+        "Fresadora convencional",
+    ),
     (r"\btorno\b|\btorneado\b", "Torno convencional"),
 ]
 
@@ -112,12 +142,26 @@ _COMPILED = [(re.compile(p), cat) for p, cat in _PATTERNS]
 # máquina" de la Ayuda). Las pruebas verifican que cada uno se clasifique en
 # su categoría: al cambiar un patrón, ajustar también estos ejemplos.
 EXAMPLES: dict[str, list[str]] = {
-    "Torno CNC": ["torno CNC", "centro de torneado", "torno tipo suizo", "torno vertical",
-                  "VTL", "torno de bancada inclinada", "torno multitarea",
-                  "torno petrolero", "torno roscador"],
+    "Torno CNC": [
+        "torno CNC",
+        "centro de torneado",
+        "torno tipo suizo",
+        "torno vertical",
+        "VTL",
+        "torno de bancada inclinada",
+        "torno multitarea",
+        "torno petrolero",
+        "torno roscador",
+    ],
     "Torno convencional": ["torno", "torno convencional", "torno petrolero convencional"],
-    "Centro de mecanizado": ["centro de mecanizado", "VMC", "HMC", "centro vertical",
-                             "centro horizontal", "5 ejes"],
+    "Centro de mecanizado": [
+        "centro de mecanizado",
+        "VMC",
+        "HMC",
+        "centro vertical",
+        "centro horizontal",
+        "5 ejes",
+    ],
     "Fresadora convencional": ["fresadora", "fresadora universal", "Bridgeport"],
     "Fresadora CNC": ["fresadora CNC", "router"],
     "Cortadora de chapa láser": ["láser", "láser de fibra", "fibra óptica"],
@@ -139,8 +183,7 @@ EXAMPLES: dict[str, list[str]] = {
 
 def examples_table() -> str:
     """Tabla Markdown [Tipo de máquina | Nombres que se reconocen]."""
-    rows = [f"| {cat} | {', '.join(EXAMPLES[cat])} |"
-            for cat in CATEGORIES if cat in EXAMPLES]
+    rows = [f"| {cat} | {', '.join(EXAMPLES[cat])} |" for cat in CATEGORIES if cat in EXAMPLES]
     return "\n".join(["| Tipo de máquina | Nombres que se reconocen |", "|---|---|", *rows])
 
 
@@ -153,7 +196,7 @@ def normalize(text: str) -> str:
     return " ".join(t.split())
 
 
-def classify_machinery(deal_name: Optional[str]) -> str:
+def classify_machinery(deal_name: str | None) -> str:
     if not deal_name:
         return OTHER
     text = normalize(deal_name)

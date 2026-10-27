@@ -3,6 +3,7 @@
 Uso:
     python -m scripts.dump_deal 1799
 """
+
 from __future__ import annotations
 
 import json
@@ -34,9 +35,11 @@ def main() -> None:
         if k.startswith("UF_") and v not in (None, "", False, [], {}):
             print(f"  {k:35s} = {v!r}")
 
-    print(f"\nSTAGE_ID={deal.get('STAGE_ID')!r}  "
-          f"STAGE_SEMANTIC_ID={deal.get('STAGE_SEMANTIC_ID')!r}  "
-          f"CATEGORY_ID={deal.get('CATEGORY_ID')!r}")
+    print(
+        f"\nSTAGE_ID={deal.get('STAGE_ID')!r}  "
+        f"STAGE_SEMANTIC_ID={deal.get('STAGE_SEMANTIC_ID')!r}  "
+        f"CATEGORY_ID={deal.get('CATEGORY_ID')!r}"
+    )
 
 
 if __name__ == "__main__":
