@@ -18,4 +18,12 @@ La caída más grande entre dos etapas indica dónde conviene poner la atención
 - Cotizada: el negocio llegó al menos a "Cotizado aguardando devolución". Un negocio perdido cuenta si se perdió después de cotizar.
 - Ganada: el negocio está en "Ganado en Desarrollo" o "Cerrado Ganado".
 
+## Informe del mes
+
+El botón "Descargar informe (ZIP)" arma un borrador del reporte de actividad del mes elegido, listo para revisar y completar. El archivo trae el informe en Markdown (se abre en Obsidian o en cualquier editor) y una carpeta con los gráficos en imagen.
+
+Incluye la calidad de las consultas, las fuentes de los negocios, las provincias, los motivos de baja, la eficiencia por fuente, la demanda por tipo de máquina y el estado del pipeline. Sólo cuenta los negocios creados en el mes, con su etapa actual. Los negocios de meses anteriores que tuvieron movimientos en el mes no se incluyen: se analizan en los períodos más largos (semestre o año) de la página Negocios Bitrix24.
+
+Las conclusiones y recomendaciones quedan marcadas para completar a mano.
+
 La tabla desplegable al final lista cada consulta derivada con su negocio y su etapa.
