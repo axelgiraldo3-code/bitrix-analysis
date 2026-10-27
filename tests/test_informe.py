@@ -1,7 +1,5 @@
-"""Pruebas del informe mensual descargable (tablas, Markdown y ZIP)."""
-import io
+"""Pruebas del informe mensual descargable (tablas y Markdown)."""
 import re
-import zipfile
 
 import pandas as pd
 import pytest
@@ -77,22 +75,54 @@ def test_md_table_formats_percent_and_total():
                                "| RRSS | 3 | 13,2 % |", "| **TOTAL** | **3** |  |"]
 
 
-def test_zip_has_markdown_and_every_linked_image(bot, deals):
-    z = zipfile.ZipFile(io.BytesIO(informe.build_zip(bot, deals, "2026-09")))
-    names = set(z.namelist())
-    md = z.read("informe_2026-09/Reporte de actividad 2026-09.md").decode("utf-8")
+def test_markdown_links_app_chart_names(bot, deals):
+    md = informe.build(bot, deals, "2026-09", [10, 3, 2, 1])
     assert md.startswith("# REPORTE DE ACTIVIDAD COMERCIAL - SEPTIEMBRE 2026")
-    links = re.findall(r"!\[[^\]]*\]\((img/[^)]+)\)", md)
-    assert "img/07_pipeline.png" in links and len(links) == 7
-    for link in links:
-        assert f"informe_2026-09/{link}" in names
-        assert z.read(f"informe_2026-09/{link}").startswith(b"\x89PNG")
+    links = re.findall(r"!\[[^\]]*\]\(img/([^)]+)\)", md)
+    assert links == [
+        "clasificaciones_2026-09.png", "embudo_2026-09.png",
+        "negocios_por_fuente_01-09-26_a_30-09-26.png",
+        "provincias_negocios_01-09-26_a_30-09-26.png",
+        "motivos_baja_01-09-26_a_30-09-26.png", "fuentes_etapa_01-09-26_a_30-09-26.png",
+        "demanda_productos_01-09-26_a_30-09-26.png"]
+    assert md.count("%% Descargar de:") == len(links)
     assert "A la fecha de corte, hay **3 negocios" in md
     assert "creados en el mes" not in md and "(3 de 10)" not in md
     assert "| Clasificación | Cantidad | Porcentaje | Descripción |" in md
 
 
+def test_class_table_fixed_order():
+    df = pd.DataFrame({"Clasificacion interna": ["SIN RESPUESTAS"] * 5 + ["SIN CLASIFICAR"]
+                       + ["DERIVADO A RRHH", "DERIVADO A BITRIX", "VENTA DE REPUESTOS"]
+                       + ["DERIVADO A TÉCNICA"] * 2})
+    assert informe.class_table(df)["Clasificación"].tolist() == [
+        "DERIVADO A BITRIX", "DERIVADO A TÉCNICA", "VENTA DE REPUESTOS", "DERIVADO A RRHH",
+        "SIN RESPUESTAS", "SIN CLASIFICAR"]
+
+
 def test_build_without_deals(bot):
-    md, images = informe.build(bot, pd.DataFrame(), "2026-09")
+    md = informe.build(bot, pd.DataFrame(), "2026-09")
     assert "Sin negocios de Bitrix" in md
-    assert list(images) == ["01_calidad_consultas.png"]
+    assert re.findall(r"\(img/([^)]+)\)", md) == ["clasificaciones_2026-09.png"]
+
+
+def test_funnel_table():
+    t = informe.funnel_table([10, 4, 2, 1])
+    assert t["% de las consultas"].tolist() == [100.0, 40.0, 20.0, 10.0]
+    assert t["% de la etapa anterior"].tolist()[1:] == [40.0, 50.0, 50.0]
+    md = informe.md_table(t, pct_cols=("% de las consultas", "% de la etapa anterior"))
+    assert "| Consultas del mes | 10 | 100,0 % | — |" in md and "|---|---:|---:|---:|" in md
+
+
+def test_build_without_funnel_skips_section(bot, deals):
+    md = informe.build(bot, deals, "2026-09")
+    assert "1.2 De la consulta a la venta" not in md and "embudo_" not in md
+
+
+def test_stacked_bars_horizontal():
+    from utils import charts
+    opt = charts.stacked_bars(["RRSS", "Web"], [("Perdido", [3, 1], "#f11716")], "f",
+                              horizontal=True)
+    assert opt["yAxis"]["type"] == "category" and opt["yAxis"]["inverse"] is True
+    assert opt["xAxis"]["type"] == "value"
+    assert opt["yAxis"]["data"] == ["RRSS", "Web"]

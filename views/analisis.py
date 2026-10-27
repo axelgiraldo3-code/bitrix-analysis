@@ -13,9 +13,6 @@ from utils.branding import COTEAR_GRAY
 from utils.styling import style_bitrix_table
 from views.common import month_filter
 
-FUNNEL_COLORS = ["#9DB9D6", "#4F80B5", "#01498E", "#11734B"]
-
-
 def _deals_for(month: str) -> tuple[pd.DataFrame, list[str]]:
     """Negocios con actividad en el mes y en el siguiente (una consulta de
     fin de mes puede generar el negocio a principios del otro)."""
@@ -43,7 +40,7 @@ def _embudo_card(counts: list[int], month: str) -> None:
     with ui.card("embudo", "Embudo de consultas"):
         c_chart, c_table = st.columns([3, 2], vertical_alignment="center")
         with c_chart:
-            ui.echart(charts.funnel(funnel.STAGES, counts, FUNNEL_COLORS, f"embudo_{month}"),
+            ui.echart(charts.funnel(funnel.STAGES, counts, funnel.COLORS, f"embudo_{month}"),
                       height=420)
         with c_table:
             st.dataframe(table_df, hide_index=True, width="stretch", column_config={
@@ -52,21 +49,22 @@ def _embudo_card(counts: list[int], month: str) -> None:
             })
 
 
-def _informe_card(df: pd.DataFrame, month: str) -> None:
+def _informe_card(df: pd.DataFrame, month: str, funnel_counts: list[int]) -> None:
     """Borrador del reporte de actividad del mes para completar a mano."""
     deals, _src, warn = data.load_bitrix_month(month)
     with ui.card("informe", "Reporte de actividad"):
         st.markdown(
-            "Borrador del reporte mensual con los gráficos y tablas ya armados: "
-            "calidad de las consultas, fuentes de los negocios, provincias, motivos de baja, "
-            "eficiencia por fuente, demanda de productos y estado del pipeline. "
-            "Se descarga un ZIP con el informe en Markdown y sus imágenes; las conclusiones "
-            "quedan marcadas para revisar y completar.")
+            "Borrador del reporte mensual con las tablas ya armadas: calidad de las "
+            "consultas, embudo de la consulta a la venta, fuentes de los negocios, "
+            "provincias, motivos de baja, eficiencia por fuente, demanda de productos y "
+            "estado del pipeline. Los gráficos se enlazan con el nombre que les pone la "
+            "app al descargarlos: guardalos en una carpeta img junto a la nota. Las "
+            "conclusiones quedan marcadas para revisar y completar.")
         if warn:
             st.warning(warn)
-        st.download_button("Descargar informe (ZIP)",
-                           data=informe.zip_builder(df, deals, month),
-                           file_name=f"informe_{month}.zip", mime="application/zip",
+        st.download_button("Descargar informe (.md)",
+                           data=informe.md_builder(df, deals, month, funnel_counts),
+                           file_name=informe.file_name(month), mime="text/markdown",
                            icon=":material/download:", on_click="ignore", key="dl_informe")
 
 
@@ -99,7 +97,7 @@ def render() -> None:
         unsafe_allow_html=True)
 
     ui.section("Informe del mes")
-    _informe_card(df, month)
+    _informe_card(df, month, counts)
 
     listing = matched[["Fecha", "Nombre", "Numero", "Negocio Bitrix", "Etapa Bitrix"]].rename(
         columns={"Negocio Bitrix": "Negocio", "Etapa Bitrix": "Etapa"})
