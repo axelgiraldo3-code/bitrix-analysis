@@ -4,6 +4,7 @@ Lectura con caché de reportes del bot, negocios de Bitrix (snapshot-first),
 índice de teléfonos y armado del mes procesado (reglas automáticas,
 clasificaciones persistidas y cola de pendientes).
 """
+
 from __future__ import annotations
 
 import time
@@ -24,8 +25,10 @@ BITRIX_SNAPSHOT_TTL_DAYS = 7
 BITRIX_SNAPSHOT_TTL_OLD_DAYS = 30
 PHONE_INDEX_TTL_DAYS = 7
 BITRIX_MEMO_TTL_SEC = 600
-SHEETS_QUOTA_WARNING = ("Google Sheets limitó las lecturas por un momento (cuota por minuto). "
-                        "Algunos meses no se cargaron: reintentá en un minuto.")
+SHEETS_QUOTA_WARNING = (
+    "Google Sheets limitó las lecturas por un momento (cuota por minuto). "
+    "Algunos meses no se cargaron: reintentá en un minuto."
+)
 
 _FLAGS_KEY = "_run_flags"
 
@@ -37,8 +40,7 @@ def consume_flags() -> None:
     """Se llama una vez por ejecución: toma los pedidos de recarga que dejaron
     los botones del panel lateral en la ejecución anterior."""
     st.session_state[_FLAGS_KEY] = {
-        k: st.session_state.pop(k, False)
-        for k in ("_force_month", "_force_period", "_force_index")
+        k: st.session_state.pop(k, False) for k in ("_force_month", "_force_period", "_force_index")
     }
 
 
@@ -70,7 +72,9 @@ def _prepare_snapshot(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_bitrix_month(year_month: str, force_refresh: bool = False) -> tuple[pd.DataFrame, str, str]:
+def load_bitrix_month(
+    year_month: str, force_refresh: bool = False
+) -> tuple[pd.DataFrame, str, str]:
     """(df, origen, aviso) para un mes. origen ∈ {'snapshot','api','error'}.
 
     Snapshot-first con vigencia según ``snapshot_ttl_days`` (7 o 30 días);
@@ -101,8 +105,9 @@ def load_bitrix_month(year_month: str, force_refresh: bool = False) -> tuple[pd.
                 deals = bitrix.fetch_activity_for_month(year_month)
                 df = bitrix.deals_to_dataframe(deals, year_month=year_month)
             if not df.empty:
-                sheets.write_month_dataframe(year_month, "Bitrix",
-                                             df.drop(columns=["_phone_sig"], errors="ignore"))
+                sheets.write_month_dataframe(
+                    year_month, "Bitrix", df.drop(columns=["_phone_sig"], errors="ignore")
+                )
                 sheets.set_last_bitrix_sync(year_month)
             result = (df, "api", "")
         except Exception as e:
@@ -113,10 +118,17 @@ def load_bitrix_month(year_month: str, force_refresh: bool = False) -> tuple[pd.
                     raise
                 snap = pd.DataFrame()
             if not snap.empty:
-                result = (snap, "snapshot", f"API de Bitrix falló ({e}). Usando snapshot vencido de {year_month}.")
+                result = (
+                    snap,
+                    "snapshot",
+                    f"API de Bitrix falló ({e}). Usando snapshot vencido de {year_month}.",
+                )
             else:
-                result = (pd.DataFrame(columns=bitrix.DEAL_COLUMNS_OUT), "error",
-                          f"No se pudo leer Bitrix ({year_month}): {e}")
+                result = (
+                    pd.DataFrame(columns=bitrix.DEAL_COLUMNS_OUT),
+                    "error",
+                    f"No se pudo leer Bitrix ({year_month}): {e}",
+                )
     memo[year_month] = {"t": time.time(), "v": result}
     return result
 
@@ -142,8 +154,9 @@ def _prefetch_snapshots(year_months: tuple[str, ...]) -> str:
     Devuelve el aviso de cuota si Sheets la rechazó ("" si no)."""
     memo = st.session_state.setdefault("_bitrix_memo", {})
     now = time.time()
-    missing = [ym for ym in year_months
-               if not (ym in memo and now - memo[ym]["t"] < BITRIX_MEMO_TTL_SEC)]
+    missing = [
+        ym for ym in year_months if not (ym in memo and now - memo[ym]["t"] < BITRIX_MEMO_TTL_SEC)
+    ]
     if len(missing) < 2:
         return ""
     try:
@@ -159,8 +172,9 @@ def _prefetch_snapshots(year_months: tuple[str, ...]) -> str:
     return ""
 
 
-def load_bitrix_period(year_months: tuple[str, ...], force_refresh: bool = False
-                       ) -> tuple[pd.DataFrame, dict[str, str], list[str]]:
+def load_bitrix_period(
+    year_months: tuple[str, ...], force_refresh: bool = False
+) -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     """Agrega varios meses de Bitrix y deduplica por 'ID negocio' quedándose
     con la copia del mes más reciente (la más actualizada). Los snapshots se
     leen en lote; si Sheets rechaza por cuota, esos meses quedan como error
@@ -169,8 +183,11 @@ def load_bitrix_period(year_months: tuple[str, ...], force_refresh: bool = False
     if not force_refresh:
         quota = _prefetch_snapshots(year_months)
         if quota:
-            return (pd.DataFrame(columns=bitrix.DEAL_COLUMNS_OUT),
-                    {ym: "error" for ym in year_months}, [quota])
+            return (
+                pd.DataFrame(columns=bitrix.DEAL_COLUMNS_OUT),
+                {ym: "error" for ym in year_months},
+                [quota],
+            )
     for ym in year_months:
         df, src, warn = load_bitrix_month(ym, force_refresh=force_refresh)
         sources[ym] = src
@@ -195,7 +212,11 @@ def load_phone_index(force_refresh: bool = False) -> tuple[pd.DataFrame, str]:
     try:
         df, ts = sheets.read_phone_index()
     except Exception as e:
-        df, ts, warn = pd.DataFrame(columns=sheets.PHONE_INDEX_HEADERS), None, f"No se pudo leer el índice de teléfonos: {e}"
+        df, ts, warn = (
+            pd.DataFrame(columns=sheets.PHONE_INDEX_HEADERS),
+            None,
+            f"No se pudo leer el índice de teléfonos: {e}",
+        )
     stale = ts is None or (datetime.now() - ts).days >= PHONE_INDEX_TTL_DAYS
     # Índices guardados antes de existir la columna Negocio: refrescar una vez
     if not df.empty and not df.get("Negocio", pd.Series(dtype=str)).astype(str).str.strip().any():
@@ -214,8 +235,9 @@ def load_phone_index(force_refresh: bool = False) -> tuple[pd.DataFrame, str]:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def process_month(month_bot: pd.DataFrame, lookup: pd.DataFrame,
-                  ignored: frozenset[str]) -> pd.DataFrame:
+def process_month(
+    month_bot: pd.DataFrame, lookup: pd.DataFrame, ignored: frozenset[str]
+) -> pd.DataFrame:
     """Ignorados → unificación por número/mes → reglas automáticas → nombres."""
     df = cache.filter_ignored(month_bot, set(ignored))
     df = cache.unify_recent(df)
@@ -224,8 +246,9 @@ def process_month(month_bot: pd.DataFrame, lookup: pd.DataFrame,
     return df
 
 
-def apply_persisted(df: pd.DataFrame, year_month: str,
-                    sheet_df: pd.DataFrame | None = None) -> pd.DataFrame:
+def apply_persisted(
+    df: pd.DataFrame, year_month: str, sheet_df: pd.DataFrame | None = None
+) -> pd.DataFrame:
     """Superpone las clasificaciones guardadas en la hoja del mes y después la
     cola de cambios pendientes (la cola pisa a lo persistido). ``sheet_df``:
     pestaña del mes ya leída (lectura en lote de varios meses)."""
@@ -246,9 +269,15 @@ def sync_month_if_changed(year_month: str, month_df: pd.DataFrame, ignored: set[
     desde la última sincronización de esta sesión."""
     if month_df.empty:
         return
-    key = str(hash(tuple(
-        month_df[["Numero", "Clasificacion interna", "Nombre"]].astype(str).itertuples(index=False)
-    )))
+    key = str(
+        hash(
+            tuple(
+                month_df[["Numero", "Clasificacion interna", "Nombre"]]
+                .astype(str)
+                .itertuples(index=False)
+            )
+        )
+    )
     synced = st.session_state.setdefault("_synced_months", {})
     if synced.get(year_month) == key:
         return
@@ -257,7 +286,6 @@ def sync_month_if_changed(year_month: str, month_df: pd.DataFrame, ignored: set[
         synced[year_month] = key
     except Exception as e:
         st.warning(f"No se pudo sincronizar el mes {year_month}: {e}")
-
 
 
 # -----------------------------------------------------------------------------
@@ -274,7 +302,9 @@ def load_ignored() -> set[str]:
 def lookups(selected_month: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(teléfono → nombre, teléfono → negocio) con los negocios del mes primero
     (más actuales) y después el índice de todos los negocios de venta."""
-    bitrix_df, _src, bitrix_warn = load_bitrix_month(selected_month, force_refresh=flag("_force_month"))
+    bitrix_df, _src, bitrix_warn = load_bitrix_month(
+        selected_month, force_refresh=flag("_force_month")
+    )
     if bitrix_warn:
         st.warning(bitrix_warn)
     phone_index, index_warn = load_phone_index(force_refresh=flag("_force_index"))
@@ -282,17 +312,23 @@ def lookups(selected_month: str) -> tuple[pd.DataFrame, pd.DataFrame]:
         st.warning(index_warn)
 
     lookup = pd.concat(
-        [bitrix_df.reindex(columns=["_phone_sig", "Cliente"]),
-         phone_index.reindex(columns=["_phone_sig", "Cliente"])],
+        [
+            bitrix_df.reindex(columns=["_phone_sig", "Cliente"]),
+            phone_index.reindex(columns=["_phone_sig", "Cliente"]),
+        ],
         ignore_index=True,
     ).fillna("")
     lookup = lookup[lookup["_phone_sig"] != ""].drop_duplicates("_phone_sig", keep="first")
 
-    month_deals = (bitrix_df[bitrix_df["_phone_sig"].astype(str) != ""]
-                   .groupby("_phone_sig")["Nombre negocio"]
-                   .agg(lambda t: " | ".join(dict.fromkeys(x for x in t if x)))
-                   .reset_index().rename(columns={"Nombre negocio": "Negocio"})
-                   if not bitrix_df.empty else pd.DataFrame(columns=["_phone_sig", "Negocio"]))
+    month_deals = (
+        bitrix_df[bitrix_df["_phone_sig"].astype(str) != ""]
+        .groupby("_phone_sig")["Nombre negocio"]
+        .agg(lambda t: " | ".join(dict.fromkeys(x for x in t if x)))
+        .reset_index()
+        .rename(columns={"Nombre negocio": "Negocio"})
+        if not bitrix_df.empty
+        else pd.DataFrame(columns=["_phone_sig", "Negocio"])
+    )
     deal_lookup = pd.concat(
         [month_deals, phone_index.reindex(columns=["_phone_sig", "Negocio"])],
         ignore_index=True,
@@ -301,9 +337,15 @@ def lookups(selected_month: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     return lookup.reset_index(drop=True), deal_lookup
 
 
-def month_data(bot_raw: pd.DataFrame, year_month: str, lookup: pd.DataFrame,
-               deal_lookup: pd.DataFrame, ignored: set[str], *, persist: bool = True
-               ) -> pd.DataFrame:
+def month_data(
+    bot_raw: pd.DataFrame,
+    year_month: str,
+    lookup: pd.DataFrame,
+    deal_lookup: pd.DataFrame,
+    ignored: set[str],
+    *,
+    persist: bool = True,
+) -> pd.DataFrame:
     """Reportes del mes procesados: ignorados, unificación, reglas automáticas,
     nombres de Bitrix, clasificaciones guardadas y pendientes, área y negocio.
 
@@ -322,8 +364,9 @@ def current_month(bot_raw: pd.DataFrame, year_month: str) -> pd.DataFrame:
     return month_data(bot_raw, year_month, lookup, deal_lookup, load_ignored())
 
 
-def month_with_previous(bot_raw: pd.DataFrame, year_month: str
-                        ) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+def month_with_previous(
+    bot_raw: pd.DataFrame, year_month: str
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """(mes procesado, mes anterior procesado o None si no tiene reportes).
     El mes anterior se usa sólo para comparar KPIs: se lee, no se sincroniza."""
     lookup, deal_lookup = lookups(year_month)
@@ -338,9 +381,13 @@ def month_with_previous(bot_raw: pd.DataFrame, year_month: str
 TREND_MONTHS = 6
 
 
-def bot_history(bot_raw: pd.DataFrame, year_month: str, current: pd.DataFrame,
-                prev: pd.DataFrame | None, n: int = TREND_MONTHS
-                ) -> list[tuple[str, pd.DataFrame | None]]:
+def bot_history(
+    bot_raw: pd.DataFrame,
+    year_month: str,
+    current: pd.DataFrame,
+    prev: pd.DataFrame | None,
+    n: int = TREND_MONTHS,
+) -> list[tuple[str, pd.DataFrame | None]]:
     """[(mes, consultas procesadas o None si no hay reportes), ...] de los
     últimos ``n`` meses hasta ``year_month`` (el más viejo primero).
 
@@ -349,8 +396,9 @@ def bot_history(bot_raw: pd.DataFrame, year_month: str, current: pd.DataFrame,
     Sheets. Sólo se leen, no se sincronizan."""
     months = [periods.shift_months(year_month, -i) for i in range(n - 1, -1, -1)]
     known = {year_month: current, periods.shift_months(year_month, -1): prev}
-    older = [m for m in months if m not in known
-             and not cache.filter_by_year_month(bot_raw, m).empty]
+    older = [
+        m for m in months if m not in known and not cache.filter_by_year_month(bot_raw, m).empty
+    ]
     out = dict(known)
     if older:
         lookup, deal_lookup = lookups(year_month)
@@ -372,8 +420,9 @@ def bot_history(bot_raw: pd.DataFrame, year_month: str, current: pd.DataFrame,
 # -----------------------------------------------------------------------------
 # Negocios de un período
 # -----------------------------------------------------------------------------
-def deals_created_between(start, end, *, force_refresh: bool = False
-                          ) -> tuple[pd.DataFrame, dict[str, str], list[str]]:
+def deals_created_between(
+    start, end, *, force_refresh: bool = False
+) -> tuple[pd.DataFrame, dict[str, str], list[str]]:
     """Negocios creados dentro de [start, end] (con su etapa actual), a partir
     de los meses de Bitrix que cubren el período."""
     months = tuple(periods.year_months_spanning(start, end))

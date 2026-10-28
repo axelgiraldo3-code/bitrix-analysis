@@ -7,10 +7,11 @@
   tabla; es sólo CSS, no vuelve a ejecutar la app.
 * ``raw_data``: tabla completa y botón de descarga dentro de un desplegable.
 """
+
 from __future__ import annotations
 
 import inspect
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import pandas as pd
 import streamlit as st
@@ -51,7 +52,8 @@ def plural(n: int, unit: str) -> str:
 # CSS global
 # ---------------------------------------------------------------------------
 def inject_css() -> None:
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <style>
       :root {{
         --ct-blue: {COTEAR_BLUE};
@@ -179,15 +181,19 @@ def inject_css() -> None:
       section[data-testid="stSidebar"] h3 {{ font-size: .8rem; letter-spacing: .06em;
         text-transform: uppercase; color: var(--ct-muted); }}
     </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Encabezados y KPIs
 # ---------------------------------------------------------------------------
 def page_header(title: str, subtitle: str = "") -> None:
-    st.markdown("<div class='ct-eyebrow'>COTEAR · Informe de Actividad Comercial</div>",
-                unsafe_allow_html=True)
+    st.markdown(
+        "<div class='ct-eyebrow'>COTEAR · Informe de Actividad Comercial</div>",
+        unsafe_allow_html=True,
+    )
     st.title(title, anchor=False)
     if subtitle:
         st.markdown(f"<div class='ct-subtitle'>{subtitle}</div>", unsafe_allow_html=True)
@@ -200,8 +206,7 @@ def section(title: str, subtitle: str = "", anchor: str = "") -> None:
     enlazarlo desde un índice (``[texto](#anchor)``)."""
     sub = f"<div class='ct-section-sub'>{subtitle}</div>" if subtitle else ""
     id_attr = f" id='{anchor}'" if anchor else ""
-    st.markdown(f"<div class='ct-section'{id_attr}>{title}</div>{sub}",
-                unsafe_allow_html=True)
+    st.markdown(f"<div class='ct-section'{id_attr}>{title}</div>{sub}", unsafe_allow_html=True)
 
 
 def _trend_color(delta: dict) -> str:
@@ -215,9 +220,16 @@ def _trend_color(delta: dict) -> str:
     return charts.SPARK_UP if good else charts.SPARK_DOWN
 
 
-def kpi(col, label: str, value, delta: dict, help: Optional[str] = None,
-        trend: Optional[list] = None, months: Optional[list[str]] = None,
-        unit: str = "") -> None:
+def kpi(
+    col,
+    label: str,
+    value,
+    delta: dict,
+    help: str | None = None,
+    trend: list | None = None,
+    months: list[str] | None = None,
+    unit: str = "",
+) -> None:
     """``delta`` = kwargs de ``utils.kpis.delta_kwargs`` / ``category_kwargs``.
     ``trend``: valores de los últimos meses (el último es el actual) y
     ``months`` sus 'YYYY-MM', para la mini línea de tendencia (no se dibuja
@@ -251,9 +263,15 @@ def card(key: str, title: str = "", subtitle: str = ""):
     return box
 
 
-def chart_card(key: str, title: str, render_chart: Callable[[], None],
-               render_data: Callable[[], None], *, subtitle: str = "",
-               controls: Optional[Callable[[], None]] = None) -> None:
+def chart_card(
+    key: str,
+    title: str,
+    render_chart: Callable[[], None],
+    render_data: Callable[[], None],
+    *,
+    subtitle: str = "",
+    controls: Callable[[], None] | None = None,
+) -> None:
     """Tarjeta con gráfico y su tabla de datos detrás.
 
     ``controls`` dibuja controles extra en el encabezado (ej. torta ⇄
@@ -261,21 +279,38 @@ def chart_card(key: str, title: str, render_chart: Callable[[], None],
     a ``chart_card`` desde una función decorada con ``@st.fragment``.
     """
     with st.container(border=True, key=f"card_{key}"):
-        with _call(st.container, horizontal=True, vertical_alignment="top",
-                   key=f"cardhead_{key}", gap="small"):
-            _call(st.markdown, _title_html(title, subtitle), unsafe_allow_html=True,
-                  width="stretch")
+        with _call(
+            st.container,
+            horizontal=True,
+            vertical_alignment="top",
+            key=f"cardhead_{key}",
+            gap="small",
+        ):
+            _call(
+                st.markdown, _title_html(title, subtitle), unsafe_allow_html=True, width="stretch"
+            )
             # Controles apilados a la derecha: el título conserva el ancho y
             # todas las tarjetas tienen el mismo alto de encabezado.
-            with _call(st.container, horizontal_alignment="right", gap="small",
-                       width="content", key=f"cardctl_{key}"):
+            with _call(
+                st.container,
+                horizontal_alignment="right",
+                gap="small",
+                width="content",
+                key=f"cardctl_{key}",
+            ):
                 if controls:
                     controls()
                 # on_change="ignore": alternar no ejecuta la app, sólo cambia el CSS.
                 _call(
-                    st.segmented_control, "Vista", [VIEW_CHART, VIEW_DATA], default=VIEW_CHART,
-                    required=True, key=f"view_{key}", on_change="ignore",
-                    label_visibility="collapsed", help=_VIEW_HELP,
+                    st.segmented_control,
+                    "Vista",
+                    [VIEW_CHART, VIEW_DATA],
+                    default=VIEW_CHART,
+                    required=True,
+                    key=f"view_{key}",
+                    on_change="ignore",
+                    label_visibility="collapsed",
+                    help=_VIEW_HELP,
                 )
         with st.container(key=f"flip_{key}"):
             with st.container(key=f"front_{key}"):
@@ -284,14 +319,20 @@ def chart_card(key: str, title: str, render_chart: Callable[[], None],
                 render_data()
 
 
-def raw_data(key: str, title: str, data, csv_df: pd.DataFrame, file_name: str,
-             **dataframe_kwargs) -> None:
+def raw_data(
+    key: str, title: str, data, csv_df: pd.DataFrame, file_name: str, **dataframe_kwargs
+) -> None:
     """Datos crudos en un desplegable cerrado, con su botón de descarga."""
     with st.expander(title, icon=":material/dataset:", key=f"raw_{key}"):
         st.dataframe(data, hide_index=True, width="stretch", **dataframe_kwargs)
         _call(
-            st.download_button, "Descargar datos (CSV)", data=csv_bytes(csv_df), file_name=file_name,
-            mime="text/csv", icon=":material/download:", on_click="ignore",
+            st.download_button,
+            "Descargar datos (CSV)",
+            data=csv_bytes(csv_df),
+            file_name=file_name,
+            mime="text/csv",
+            icon=":material/download:",
+            on_click="ignore",
             key=f"dl_{key}",
         )
 
@@ -299,11 +340,14 @@ def raw_data(key: str, title: str, data, csv_df: pd.DataFrame, file_name: str,
 # ---------------------------------------------------------------------------
 # Gráficos
 # ---------------------------------------------------------------------------
-def echart(option: dict, *, height: int = 360, key: Optional[str] = None,
-           alt: Optional[str] = None) -> None:
+def echart(
+    option: dict, *, height: int = 360, key: str | None = None, alt: str | None = None
+) -> None:
     if not hasattr(st, "echarts_chart"):
-        st.error("Esta versión de Streamlit no tiene gráficos ECharts. "
-                 "Actualizá con `pip install -U streamlit` (mínimo 1.66).")
+        st.error(
+            "Esta versión de Streamlit no tiene gráficos ECharts. "
+            "Actualizá con `pip install -U streamlit` (mínimo 1.66)."
+        )
         return
     _call(st.echarts_chart, option, height=height, key=key, alt=alt)
 
@@ -311,7 +355,7 @@ def echart(option: dict, *, height: int = 360, key: Optional[str] = None,
 PLOTLY_STATIC = {"displayModeBar": False, "scrollZoom": False, "displaylogo": False}
 
 
-def plotly_map(fig, *, key: Optional[str] = None) -> None:
+def plotly_map(fig, *, key: str | None = None) -> None:
     """Mapa Plotly sin barra de herramientas ni zoom (sólo tooltip)."""
     fig.update_layout(dragmode=False)
     st.plotly_chart(fig, width="stretch", config=PLOTLY_STATIC, key=key)

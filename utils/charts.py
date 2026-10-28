@@ -3,10 +3,11 @@
 Todos los gráficos comparten: tooltip al pasar el mouse, sin controles de
 zoom, y un único ícono para descargar la imagen en PNG.
 """
+
 from __future__ import annotations
 
 import html
-from typing import Sequence
+from collections.abc import Sequence
 
 from .branding import COTEAR_BLUE, COTEAR_GRAY
 
@@ -20,8 +21,18 @@ DARK_LABEL = "#1A1D21"
 SMOOTH = 0.35
 
 # Paleta para series sin color propio (ej. motivos de baja)
-SERIES_COLORS = [COTEAR_BLUE, "#E67E22", "#11734B", "#39A8EF", "#B10202",
-                 "#5A3286", "#C9A400", "#2BB3A3", "#D35FB7", COTEAR_GRAY]
+SERIES_COLORS = [
+    COTEAR_BLUE,
+    "#E67E22",
+    "#11734B",
+    "#39A8EF",
+    "#B10202",
+    "#5A3286",
+    "#C9A400",
+    "#2BB3A3",
+    "#D35FB7",
+    COTEAR_GRAY,
+]
 
 
 # ---------------------------------------------------------------------------
@@ -31,10 +42,12 @@ def _luminance(hex_color: str) -> float:
     h = hex_color.lstrip("#")
     if len(h) == 3:
         h = "".join(c * 2 for c in h)
+
     def ch(c: int) -> float:
         c = c / 255
         return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-    r, g, b = (ch(int(h[i:i + 2], 16)) for i in (0, 2, 4))
+
+    r, g, b = (ch(int(h[i : i + 2], 16)) for i in (0, 2, 4))
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
@@ -45,8 +58,11 @@ def contrast_ratio(a: str, b: str) -> float:
 
 def label_color(fill: str) -> str:
     """Blanco u oscuro, el que más se lea sobre ``fill`` (WCAG)."""
-    return "#FFFFFF" if contrast_ratio(fill, "#FFFFFF") >= contrast_ratio(fill, DARK_LABEL) \
+    return (
+        "#FFFFFF"
+        if contrast_ratio(fill, "#FFFFFF") >= contrast_ratio(fill, DARK_LABEL)
         else DARK_LABEL
+    )
 
 
 def fmt_dec(v: float, decimals: int = 1) -> str:
@@ -73,13 +89,19 @@ def series_color(i: int) -> str:
 # ---------------------------------------------------------------------------
 def _toolbox(filename: str) -> dict:
     return {
-        "right": 0, "top": 0, "itemSize": 14,
+        "right": 0,
+        "top": 0,
+        "itemSize": 14,
         "iconStyle": {"borderColor": "#9AA4AD"},
         "emphasis": {"iconStyle": {"borderColor": COTEAR_BLUE}},
-        "feature": {"saveAsImage": {
-            "title": "Descargar PNG", "name": filename, "pixelRatio": 2,
-            "backgroundColor": "#FFFFFF",
-        }},
+        "feature": {
+            "saveAsImage": {
+                "title": "Descargar PNG",
+                "name": filename,
+                "pixelRatio": 2,
+                "backgroundColor": "#FFFFFF",
+            }
+        },
     }
 
 
@@ -93,8 +115,14 @@ def _base(filename: str) -> dict:
 
 
 def _legend(**kw) -> dict:
-    return {"type": "scroll", "icon": "roundRect", "itemWidth": 12, "itemHeight": 12,
-            "textStyle": {"color": TEXT, "fontSize": 12}, **kw}
+    return {
+        "type": "scroll",
+        "icon": "roundRect",
+        "itemWidth": 12,
+        "itemHeight": 12,
+        "textStyle": {"color": TEXT, "fontSize": 12},
+        **kw,
+    }
 
 
 def legend_rows(names: Sequence[str], width: int, max_label: int = 0) -> int:
@@ -111,8 +139,13 @@ def legend_rows(names: Sequence[str], width: int, max_label: int = 0) -> int:
 
 
 def _value_axis(name: str = "", percent: bool = False) -> dict:
-    axis = {"type": "value", "name": name, "nameTextStyle": {"color": MUTED},
-            "axisLabel": {"color": MUTED}, "splitLine": {"lineStyle": {"color": GRID}}}
+    axis = {
+        "type": "value",
+        "name": name,
+        "nameTextStyle": {"color": MUTED},
+        "axisLabel": {"color": MUTED},
+        "splitLine": {"lineStyle": {"color": GRID}},
+    }
     if percent:
         axis.update(max=100, axisLabel={"color": MUTED, "formatter": "{value} %"})
     return axis
@@ -121,9 +154,16 @@ def _value_axis(name: str = "", percent: bool = False) -> dict:
 # ---------------------------------------------------------------------------
 # Gráficos
 # ---------------------------------------------------------------------------
-def donut(names: Sequence[str], values: Sequence[float], colors: Sequence[str],
-          filename: str, *, width: int = 520, height: int = 380,
-          label_width: int = 150) -> dict:
+def donut(
+    names: Sequence[str],
+    values: Sequence[float],
+    colors: Sequence[str],
+    filename: str,
+    *,
+    width: int = 520,
+    height: int = 380,
+    label_width: int = 150,
+) -> dict:
     """Torta con agujero: porcentaje dentro de cada porción y leyenda abajo
     (las etiquetas largas se cortan; el texto completo aparece en el
     tooltip). ``width``/``height`` aproximan el tamaño en px para ubicar la
@@ -134,12 +174,15 @@ def donut(names: Sequence[str], values: Sequence[float], colors: Sequence[str],
     data = []
     for n, v, c in zip(names, values, colors):
         pct = pct_label(float(v) / total * 100)
-        data.append({
-            "name": str(n), "value": float(v),
-            "itemStyle": {"color": c},
-            "label": {"color": label_color(c), "formatter": pct},
-            "tooltip": {"formatter": f"{html.escape(str(n))}<br/>{_num(v)} ({pct})"},
-        })
+        data.append(
+            {
+                "name": str(n),
+                "value": float(v),
+                "itemStyle": {"color": c},
+                "label": {"color": label_color(c), "formatter": pct},
+                "tooltip": {"formatter": f"{html.escape(str(n))}<br/>{_num(v)} ({pct})"},
+            }
+        )
     rows = legend_rows(names, width - 16, label_width)
     legend_h = rows * 22 + 6
     free_h = height - legend_h - 24
@@ -147,53 +190,79 @@ def donut(names: Sequence[str], values: Sequence[float], colors: Sequence[str],
     return {
         **_base(filename),
         "tooltip": {"trigger": "item", "confine": True},
-        "legend": _legend(type="plain", bottom=0, left="center",
-                          textStyle={"color": TEXT, "fontSize": 12, "width": label_width,
-                                     "overflow": "truncate"},
-                          tooltip={"show": True}),
-        "series": [{
-            "type": "pie", "radius": [int(radius * 0.39), radius],
-            "center": ["50%", 18 + free_h // 2],
-            "avoidLabelOverlap": True,
-            "itemStyle": {"borderColor": "#FFFFFF", "borderWidth": 1},
-            "label": {"show": True, "position": "inside",
-                      "fontSize": 11, "fontWeight": "bold"},
-            "labelLayout": {"hideOverlap": True},
-            "emphasis": {"scaleSize": 6},
-            "data": data,
-        }],
+        "legend": _legend(
+            type="plain",
+            bottom=0,
+            left="center",
+            textStyle={"color": TEXT, "fontSize": 12, "width": label_width, "overflow": "truncate"},
+            tooltip={"show": True},
+        ),
+        "series": [
+            {
+                "type": "pie",
+                "radius": [int(radius * 0.39), radius],
+                "center": ["50%", 18 + free_h // 2],
+                "avoidLabelOverlap": True,
+                "itemStyle": {"borderColor": "#FFFFFF", "borderWidth": 1},
+                "label": {"show": True, "position": "inside", "fontSize": 11, "fontWeight": "bold"},
+                "labelLayout": {"hideOverlap": True},
+                "emphasis": {"scaleSize": 6},
+                "data": data,
+            }
+        ],
     }
 
 
-def hbar(names: Sequence[str], values: Sequence[float], colors: Sequence[str] | str,
-         filename: str, *, unit: str = "", label_width: int = 150) -> dict:
+def hbar(
+    names: Sequence[str],
+    values: Sequence[float],
+    colors: Sequence[str] | str,
+    filename: str,
+    *,
+    unit: str = "",
+    label_width: int = 150,
+) -> dict:
     """Barras horizontales ordenadas de mayor (arriba) a menor."""
     if isinstance(colors, str):
         colors = [colors] * len(names)
-    rows = list(zip(names, values, colors))[::-1]   # ECharts dibuja de abajo hacia arriba
+    rows = list(zip(names, values, colors))[::-1]  # ECharts dibuja de abajo hacia arriba
     return {
         **_base(filename),
         "tooltip": {"trigger": "item", "confine": True, "formatter": "{b}<br/>{c}" + unit},
         "grid": {"left": 8, "right": 48, "top": 28, "bottom": 8, "containLabel": True},
         "xAxis": {**_value_axis(), "show": False},
-        "yAxis": {"type": "category", "data": [str(n) for n, _, _ in rows],
-                  "axisTick": {"show": False}, "axisLine": {"show": False},
-                  "axisLabel": {"color": TEXT, "width": label_width, "overflow": "truncate"},
-                  "tooltip": {"show": True}},
-        "series": [{
-            "type": "bar", "barMaxWidth": 22,
-            "itemStyle": {"borderRadius": [0, 4, 4, 0]},
-            "label": {"show": True, "position": "right", "color": TEXT,
-                      "formatter": "{c}"},
-            "data": [{"value": float(v), "itemStyle": {"color": c}} for _, v, c in rows],
-        }],
+        "yAxis": {
+            "type": "category",
+            "data": [str(n) for n, _, _ in rows],
+            "axisTick": {"show": False},
+            "axisLine": {"show": False},
+            "axisLabel": {"color": TEXT, "width": label_width, "overflow": "truncate"},
+            "tooltip": {"show": True},
+        },
+        "series": [
+            {
+                "type": "bar",
+                "barMaxWidth": 22,
+                "itemStyle": {"borderRadius": [0, 4, 4, 0]},
+                "label": {"show": True, "position": "right", "color": TEXT, "formatter": "{c}"},
+                "data": [{"value": float(v), "itemStyle": {"color": c}} for _, v, c in rows],
+            }
+        ],
     }
 
 
-def stacked_bars(categories: Sequence[str], series: Sequence[tuple[str, Sequence[float], str]],
-                 filename: str, *, y_name: str = "", percent: bool = False,
-                 rotate: int = 0, width: int = 720, label_width: int = 110,
-                 horizontal: bool = False) -> dict:
+def stacked_bars(
+    categories: Sequence[str],
+    series: Sequence[tuple[str, Sequence[float], str]],
+    filename: str,
+    *,
+    y_name: str = "",
+    percent: bool = False,
+    rotate: int = 0,
+    width: int = 720,
+    label_width: int = 110,
+    horizontal: bool = False,
+) -> dict:
     """Columnas apiladas. ``series`` = [(nombre, valores, color), ...].
     ``horizontal``: barras horizontales con la primera categoría arriba.
     Los segmentos en 0 no muestran etiqueta. En porcentaje, etiquetas y
@@ -201,8 +270,13 @@ def stacked_bars(categories: Sequence[str], series: Sequence[tuple[str, Sequence
     no admiten coma decimal."""
     # Altura de la columna más alta: los segmentos muy finos (< 4 % de esa
     # altura) no muestran etiqueta porque no entra; el valor sigue en el tooltip.
-    stack_max = max((sum(float(vals[i]) for _, vals, _ in series)
-                     for i in range(len(categories))), default=0) or 1
+    stack_max = (
+        max(
+            (sum(float(vals[i]) for _, vals, _ in series) for i in range(len(categories))),
+            default=0,
+        )
+        or 1
+    )
     min_label = stack_max * 0.04
     out_series = []
     for name, values, color in series:
@@ -216,24 +290,42 @@ def stacked_bars(categories: Sequence[str], series: Sequence[tuple[str, Sequence
             elif percent:
                 item["label"] = {"formatter": pct_label(v)}
             if percent:
-                item["tooltip"] = {"formatter": f"{html.escape(str(cat))}<br/>"
-                                              f"{html.escape(str(name))}: {pct_label(v)}"}
+                item["tooltip"] = {
+                    "formatter": f"{html.escape(str(cat))}<br/>"
+                    f"{html.escape(str(name))}: {pct_label(v)}"
+                }
             data.append(item)
-        out_series.append({
-            "name": name, "type": "bar", "stack": "total", "barMaxWidth": 56,
-            "itemStyle": {"color": color},
-            "label": {"show": True, "color": txt, "fontSize": 11, "formatter": "{c}"},
-            "emphasis": {"focus": "series"},
-            "data": data,
-        })
-    tooltip = {"trigger": "item", "confine": True} if percent else \
-        {"trigger": "axis", "confine": True, "axisPointer": {"type": "shadow"}}
-    cat_axis = {"type": "category", "data": [str(c) for c in categories],
-                "axisTick": {"show": False},
-                "axisLine": {"lineStyle": {"color": "#D5DBE1"}},
-                "axisLabel": {"color": TEXT, "rotate": rotate, "interval": 0,
-                              "width": label_width, "overflow": "truncate"},
-                "tooltip": {"show": True}}
+        out_series.append(
+            {
+                "name": name,
+                "type": "bar",
+                "stack": "total",
+                "barMaxWidth": 56,
+                "itemStyle": {"color": color},
+                "label": {"show": True, "color": txt, "fontSize": 11, "formatter": "{c}"},
+                "emphasis": {"focus": "series"},
+                "data": data,
+            }
+        )
+    tooltip = (
+        {"trigger": "item", "confine": True}
+        if percent
+        else {"trigger": "axis", "confine": True, "axisPointer": {"type": "shadow"}}
+    )
+    cat_axis = {
+        "type": "category",
+        "data": [str(c) for c in categories],
+        "axisTick": {"show": False},
+        "axisLine": {"lineStyle": {"color": "#D5DBE1"}},
+        "axisLabel": {
+            "color": TEXT,
+            "rotate": rotate,
+            "interval": 0,
+            "width": label_width,
+            "overflow": "truncate",
+        },
+        "tooltip": {"show": True},
+    }
     value_axis = _value_axis(y_name, percent)
     if horizontal:
         cat_axis.update(inverse=True, axisLine={"show": False})
@@ -243,54 +335,103 @@ def stacked_bars(categories: Sequence[str], series: Sequence[tuple[str, Sequence
         **_base(filename),
         "tooltip": tooltip,
         "legend": _legend(type="plain", bottom=0, left="center"),
-        "grid": {"left": 8, "right": 16, "top": 36, "containLabel": True,
-                 "bottom": legend_rows([n for n, _, _ in series], width - 16) * 22 + 12},
+        "grid": {
+            "left": 8,
+            "right": 16,
+            "top": 36,
+            "containLabel": True,
+            "bottom": legend_rows([n for n, _, _ in series], width - 16) * 22 + 12,
+        },
         "xAxis": value_axis if horizontal else cat_axis,
         "yAxis": cat_axis if horizontal else value_axis,
         "series": out_series,
     }
 
 
-def timeseries(categories: Sequence[str], series: Sequence[tuple[str, Sequence[float], str]],
-               filename: str, *, kind: str = "line", y_name: str = "",
-               width: int = 900) -> dict:
+def timeseries(
+    categories: Sequence[str],
+    series: Sequence[tuple[str, Sequence[float], str]],
+    filename: str,
+    *,
+    kind: str = "line",
+    y_name: str = "",
+    width: int = 900,
+) -> dict:
     """Evolución en el tiempo: líneas o columnas agrupadas (no apiladas).
     ``series`` = [(nombre, valores, color), ...]."""
     out = []
     for name, values, color in series:
-        item: dict = {"name": name, "type": "bar" if kind == "bar" else "line",
-                      "itemStyle": {"color": color},
-                      "emphasis": {"focus": "series"},
-                      "data": [float(v) for v in values]}
+        item: dict = {
+            "name": name,
+            "type": "bar" if kind == "bar" else "line",
+            "itemStyle": {"color": color},
+            "emphasis": {"focus": "series"},
+            "data": [float(v) for v in values],
+        }
         if kind == "bar":
-            item.update(barMaxWidth=28, itemStyle={"color": color, "borderRadius": [4, 4, 0, 0]},
-                        label={"show": True, "position": "top", "color": TEXT, "fontSize": 11,
-                               "formatter": "{c}"})
+            item.update(
+                barMaxWidth=28,
+                itemStyle={"color": color, "borderRadius": [4, 4, 0, 0]},
+                label={
+                    "show": True,
+                    "position": "top",
+                    "color": TEXT,
+                    "fontSize": 11,
+                    "formatter": "{c}",
+                },
+            )
         else:
-            item.update(smooth=SMOOTH, smoothMonotone="x", symbol="circle", symbolSize=7,
-                        lineStyle={"width": 2.5, "color": color},
-                        label={"show": len(categories) <= 14, "position": "top",
-                               "color": TEXT, "fontSize": 11})
+            item.update(
+                smooth=SMOOTH,
+                smoothMonotone="x",
+                symbol="circle",
+                symbolSize=7,
+                lineStyle={"width": 2.5, "color": color},
+                label={
+                    "show": len(categories) <= 14,
+                    "position": "top",
+                    "color": TEXT,
+                    "fontSize": 11,
+                },
+            )
         out.append(item)
     return {
         **_base(filename),
-        "tooltip": {"trigger": "axis", "confine": True,
-                    "axisPointer": {"type": "shadow" if kind == "bar" else "line"}},
+        "tooltip": {
+            "trigger": "axis",
+            "confine": True,
+            "axisPointer": {"type": "shadow" if kind == "bar" else "line"},
+        },
         "legend": _legend(type="plain", bottom=0, left="center"),
-        "grid": {"left": 8, "right": 16, "top": 36, "containLabel": True,
-                 "bottom": legend_rows([s[0] for s in series], width - 16) * 22 + 12},
-        "xAxis": {"type": "category", "data": [str(c) for c in categories],
-                  "boundaryGap": kind == "bar", "axisTick": {"show": False},
-                  "axisLine": {"lineStyle": {"color": "#D5DBE1"}},
-                  "axisLabel": {"color": TEXT}},
+        "grid": {
+            "left": 8,
+            "right": 16,
+            "top": 36,
+            "containLabel": True,
+            "bottom": legend_rows([s[0] for s in series], width - 16) * 22 + 12,
+        },
+        "xAxis": {
+            "type": "category",
+            "data": [str(c) for c in categories],
+            "boundaryGap": kind == "bar",
+            "axisTick": {"show": False},
+            "axisLine": {"lineStyle": {"color": "#D5DBE1"}},
+            "axisLabel": {"color": TEXT},
+        },
         "yAxis": {**_value_axis(y_name), "minInterval": 1},
         "series": out,
     }
 
 
-def leader_bars(categories: Sequence[str], leaders: Sequence[tuple[str, int, int]],
-                colors: dict[str, str], filename: str, *, y_name: str = "",
-                width: int = 600) -> dict:
+def leader_bars(
+    categories: Sequence[str],
+    leaders: Sequence[tuple[str, int, int]],
+    colors: dict[str, str],
+    filename: str,
+    *,
+    y_name: str = "",
+    width: int = 600,
+) -> dict:
     """Una columna por período con la categoría líder de ese período, en su
     color. ``leaders`` = [(líder, casos, total del período), ...]; un período
     sin casos queda vacío. Cada líder es una serie (para la leyenda) apilada
@@ -305,34 +446,66 @@ def leader_bars(categories: Sequence[str], leaders: Sequence[tuple[str, int, int
                 data.append("-")
                 continue
             pct = pct_label(v / total * 100) if total else "—"
-            data.append({"value": float(v), "tooltip": {"formatter": (
-                f"{html.escape(str(cat))} · {html.escape(name)}<br/>"
-                f"{_num(v)} de {_num(total)} ({pct})")}})
-        out_series.append({
-            "name": name, "type": "bar", "stack": "lider", "barMaxWidth": 40,
-            "itemStyle": {"color": colors.get(name, COTEAR_GRAY), "borderRadius": [4, 4, 0, 0]},
-            "label": {"show": True, "position": "top", "color": TEXT, "fontSize": 11,
-                      "formatter": "{c}"},
-            "data": data,
-        })
+            data.append(
+                {
+                    "value": float(v),
+                    "tooltip": {
+                        "formatter": (
+                            f"{html.escape(str(cat))} · {html.escape(name)}<br/>"
+                            f"{_num(v)} de {_num(total)} ({pct})"
+                        )
+                    },
+                }
+            )
+        out_series.append(
+            {
+                "name": name,
+                "type": "bar",
+                "stack": "lider",
+                "barMaxWidth": 40,
+                "itemStyle": {"color": colors.get(name, COTEAR_GRAY), "borderRadius": [4, 4, 0, 0]},
+                "label": {
+                    "show": True,
+                    "position": "top",
+                    "color": TEXT,
+                    "fontSize": 11,
+                    "formatter": "{c}",
+                },
+                "data": data,
+            }
+        )
     return {
         **_base(filename),
         "tooltip": {"trigger": "item", "confine": True},
         "legend": _legend(type="plain", bottom=0, left="center"),
-        "grid": {"left": 8, "right": 16, "top": 36, "containLabel": True,
-                 "bottom": legend_rows(names, width - 16) * 22 + 12},
-        "xAxis": {"type": "category", "data": [str(c) for c in categories],
-                  "axisTick": {"show": False},
-                  "axisLine": {"lineStyle": {"color": "#D5DBE1"}},
-                  "axisLabel": {"color": TEXT}},
+        "grid": {
+            "left": 8,
+            "right": 16,
+            "top": 36,
+            "containLabel": True,
+            "bottom": legend_rows(names, width - 16) * 22 + 12,
+        },
+        "xAxis": {
+            "type": "category",
+            "data": [str(c) for c in categories],
+            "axisTick": {"show": False},
+            "axisLine": {"lineStyle": {"color": "#D5DBE1"}},
+            "axisLabel": {"color": TEXT},
+        },
         "yAxis": {**_value_axis(y_name), "minInterval": 1},
         "series": out_series,
     }
 
 
-def heatmap(x_labels: Sequence[str], y_labels: Sequence[str],
-            cells: Sequence[tuple[int, int, float]], filename: str, *,
-            unit: str = "consultas", tooltips: Sequence[str] | None = None) -> dict:
+def heatmap(
+    x_labels: Sequence[str],
+    y_labels: Sequence[str],
+    cells: Sequence[tuple[int, int, float]],
+    filename: str,
+    *,
+    unit: str = "consultas",
+    tooltips: Sequence[str] | None = None,
+) -> dict:
     """Mapa de calor. ``cells`` = [(x, y, valor), ...] con índices de
     ``x_labels`` / ``y_labels``. Escala gris claro → azul Cotear; las celdas
     en 0 quedan en blanco."""
@@ -344,27 +517,50 @@ def heatmap(x_labels: Sequence[str], y_labels: Sequence[str],
         **_base(filename),
         "tooltip": {"trigger": "item", "confine": True},
         "grid": {"left": 8, "right": 12, "top": 28, "bottom": 52, "containLabel": True},
-        "xAxis": {"type": "category", "data": list(x_labels), "splitArea": {"show": False},
-                  "axisTick": {"show": False}, "axisLine": {"show": False},
-                  "axisLabel": {"color": MUTED, "fontSize": 10, "interval": 1}},
-        "yAxis": {"type": "category", "data": list(y_labels), "inverse": True,
-                  "axisTick": {"show": False}, "axisLine": {"show": False},
-                  "axisLabel": {"color": TEXT}},
-        "visualMap": {"min": 0, "max": vmax, "calculable": False, "orient": "horizontal",
-                      "left": "center", "bottom": 0, "itemWidth": 12, "itemHeight": 160,
-                      "text": [f"Más {unit}", "Menos"], "textStyle": {"color": MUTED},
-                      "inRange": {"color": ["#E8EEF5", "#7FA6CC", COTEAR_BLUE]}},
-        "series": [{
-            "type": "heatmap", "data": data,
-            "itemStyle": {"borderColor": "#FFFFFF", "borderWidth": 2, "borderRadius": 3},
-            "label": {"show": False},
-            "emphasis": {"itemStyle": {"borderColor": TEXT, "borderWidth": 1}},
-        }],
+        "xAxis": {
+            "type": "category",
+            "data": list(x_labels),
+            "splitArea": {"show": False},
+            "axisTick": {"show": False},
+            "axisLine": {"show": False},
+            "axisLabel": {"color": MUTED, "fontSize": 10, "interval": 1},
+        },
+        "yAxis": {
+            "type": "category",
+            "data": list(y_labels),
+            "inverse": True,
+            "axisTick": {"show": False},
+            "axisLine": {"show": False},
+            "axisLabel": {"color": TEXT},
+        },
+        "visualMap": {
+            "min": 0,
+            "max": vmax,
+            "calculable": False,
+            "orient": "horizontal",
+            "left": "center",
+            "bottom": 0,
+            "itemWidth": 12,
+            "itemHeight": 160,
+            "text": [f"Más {unit}", "Menos"],
+            "textStyle": {"color": MUTED},
+            "inRange": {"color": ["#E8EEF5", "#7FA6CC", COTEAR_BLUE]},
+        },
+        "series": [
+            {
+                "type": "heatmap",
+                "data": data,
+                "itemStyle": {"borderColor": "#FFFFFF", "borderWidth": 2, "borderRadius": 3},
+                "label": {"show": False},
+                "emphasis": {"itemStyle": {"borderColor": TEXT, "borderWidth": 1}},
+            }
+        ],
     }
 
 
-def funnel(names: Sequence[str], values: Sequence[float], colors: Sequence[str],
-           filename: str) -> dict:
+def funnel(
+    names: Sequence[str], values: Sequence[float], colors: Sequence[str], filename: str
+) -> dict:
     """Embudo con el orden dado (no se reordena). La etiqueta muestra la
     cantidad y el % sobre la primera etapa; el tooltip, además, el % sobre la
     etapa anterior."""
@@ -375,28 +571,46 @@ def funnel(names: Sequence[str], values: Sequence[float], colors: Sequence[str],
         of_first = pct_label(v / first * 100) if first else "—"
         prev = float(values[i - 1]) if i else 0.0
         step = f"<br/>{pct_label(v / prev * 100)} de la etapa anterior" if i and prev else ""
-        data.append({
-            "name": str(n), "value": v,
-            "itemStyle": {"color": c},
-            "label": {"color": label_color(c),
-                      "formatter": f"{n}\n{_num(v)} · {of_first}"},
-            "tooltip": {"formatter": f"{html.escape(str(n))}: {_num(v)}<br/>"
-                                     f"{of_first} de las consultas{step}"},
-        })
+        data.append(
+            {
+                "name": str(n),
+                "value": v,
+                "itemStyle": {"color": c},
+                "label": {"color": label_color(c), "formatter": f"{n}\n{_num(v)} · {of_first}"},
+                "tooltip": {
+                    "formatter": f"{html.escape(str(n))}: {_num(v)}<br/>"
+                    f"{of_first} de las consultas{step}"
+                },
+            }
+        )
     return {
         **_base(filename),
         "tooltip": {"trigger": "item", "confine": True},
-        "series": [{
-            "type": "funnel", "sort": "none", "gap": 3,
-            "left": "6%", "right": "6%", "top": 30, "bottom": 10,
-            "minSize": "18%", "maxSize": "100%",
-            "label": {"show": True, "position": "inside", "fontSize": 12,
-                      "fontWeight": "bold", "lineHeight": 16, "textBorderWidth": 0},
-            "labelLine": {"show": False},
-            "itemStyle": {"borderColor": "#FFFFFF", "borderWidth": 1},
-            "emphasis": {"label": {"fontSize": 13}},
-            "data": data,
-        }],
+        "series": [
+            {
+                "type": "funnel",
+                "sort": "none",
+                "gap": 3,
+                "left": "6%",
+                "right": "6%",
+                "top": 30,
+                "bottom": 10,
+                "minSize": "18%",
+                "maxSize": "100%",
+                "label": {
+                    "show": True,
+                    "position": "inside",
+                    "fontSize": 12,
+                    "fontWeight": "bold",
+                    "lineHeight": 16,
+                    "textBorderWidth": 0,
+                },
+                "labelLine": {"show": False},
+                "itemStyle": {"borderColor": "#FFFFFF", "borderWidth": 1},
+                "emphasis": {"label": {"fontSize": 13}},
+                "data": data,
+            }
+        ],
     }
 
 
@@ -409,26 +623,38 @@ def sparkline(labels: Sequence[str], values: Sequence, color: str, *, unit: str 
     como hueco. El texto del tooltip va en la categoría del eje (que no se
     ve), porque la plantilla "{c}" mostraría el punto decimal."""
     data = ["-" if v is None else v for v in values]
-    tips = [f"{x} - sin datos" if v is None else f"{x} - {_num(v)}{unit}"
-            for x, v in zip(labels, values)]
+    tips = [
+        f"{x} - sin datos" if v is None else f"{x} - {_num(v)}{unit}"
+        for x, v in zip(labels, values)
+    ]
     return {
         "animation": False,
         "grid": {"left": 4, "right": 4, "top": 6, "bottom": 4},
-        "xAxis": {"type": "category", "show": False, "boundaryGap": False,
-                  "data": tips},
+        "xAxis": {"type": "category", "show": False, "boundaryGap": False, "data": tips},
         "yAxis": {"type": "value", "show": False, "scale": True},
-        "tooltip": {"trigger": "axis", "confine": False, "appendToBody": True,
-                    "formatter": "{b}", "padding": [3, 8],
-                    "textStyle": {"fontSize": 12, "color": TEXT},
-                    "axisPointer": {"type": "line",
-                                    "lineStyle": {"color": "#C9D1D9", "width": 1}}},
-        "series": [{
-            "type": "line", "smooth": SMOOTH, "smoothMonotone": "x",
-            "data": data, "connectNulls": False,
-            "showSymbol": False, "symbol": "circle", "symbolSize": 6,
-            "lineStyle": {"width": 2, "color": color},
-            "itemStyle": {"color": color},
-            "areaStyle": {"color": color, "opacity": 0.10},
-            "emphasis": {"focus": "none", "scale": 1.4},
-        }],
+        "tooltip": {
+            "trigger": "axis",
+            "confine": False,
+            "appendToBody": True,
+            "formatter": "{b}",
+            "padding": [3, 8],
+            "textStyle": {"fontSize": 12, "color": TEXT},
+            "axisPointer": {"type": "line", "lineStyle": {"color": "#C9D1D9", "width": 1}},
+        },
+        "series": [
+            {
+                "type": "line",
+                "smooth": SMOOTH,
+                "smoothMonotone": "x",
+                "data": data,
+                "connectNulls": False,
+                "showSymbol": False,
+                "symbol": "circle",
+                "symbolSize": 6,
+                "lineStyle": {"width": 2, "color": color},
+                "itemStyle": {"color": color},
+                "areaStyle": {"color": color, "opacity": 0.10},
+                "emphasis": {"focus": "none", "scale": 1.4},
+            }
+        ],
     }

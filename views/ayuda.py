@@ -3,6 +3,7 @@
 La nota "Ayuda" es el índice; debajo van las notas que enlaza, en ese orden.
 Los valores ``{{nombre}}`` de las notas salen de ``values()``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -19,6 +20,7 @@ BACK = "[:material/arrow_upward: Volver al índice](#indice)"
 def values() -> dict[str, object]:
     """Valores que las notas toman del código, para que no queden desactualizados."""
     from views import negocios, reporte
+
     return {
         "meses_tendencia": data.TREND_MONTHS,
         "hora_inicio": reporte.DAY_START_HOUR,

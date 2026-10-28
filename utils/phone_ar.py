@@ -7,18 +7,17 @@ dígitos según el código. Si no es argentino, se devuelve el número tal cual
 `data/codigos_area_argentina.json` mapea cada código de área a su provincia;
 `province_of()` usa ese mapa para el análisis geográfico.
 """
+
 from __future__ import annotations
 
 import json
 import re
 from pathlib import Path
-from typing import Optional
-
 
 _DIGITS = re.compile(r"\D+")
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-_CODES_CACHE: Optional[dict[str, str]] = None
-_SORTED_CODES: Optional[list[str]] = None
+_CODES_CACHE: dict[str, str] | None = None
+_SORTED_CODES: list[str] | None = None
 
 ZONE_FOREIGN = "Extranjero"
 ZONE_UNKNOWN = "Sin identificar"
@@ -118,7 +117,7 @@ def format_ar(raw: str | None) -> str:
     local10 = digits[-10:]
     area = area_code_of(local10)
     if area:
-        local = local10[len(area):]
+        local = local10[len(area) :]
     else:
         # Fallback: asumir 3 dígitos de área
         area, local = local10[:3], local10[3:]

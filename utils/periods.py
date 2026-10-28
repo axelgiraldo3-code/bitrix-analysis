@@ -1,6 +1,7 @@
 """Utilidades de períodos de tiempo para los filtros del Tab de Bitrix
 (mes, trimestre, año, rango personalizado).
 """
+
 from __future__ import annotations
 
 import calendar
@@ -39,8 +40,11 @@ def quarter_bounds(year: int, quarter: int) -> tuple[date, date]:
 def semester_bounds(year: int, semester: int) -> tuple[date, date]:
     """Primer y último día del semestre (1: ene–jun, 2: jul–dic)."""
     assert semester in (1, 2), semester
-    return (date(year, 1, 1), date(year, 6, 30)) if semester == 1 \
+    return (
+        (date(year, 1, 1), date(year, 6, 30))
+        if semester == 1
         else (date(year, 7, 1), date(year, 12, 31))
+    )
 
 
 def current_semester(today: date) -> int:
@@ -80,8 +84,11 @@ def previous_period(start: date, end: date, kind: str) -> tuple[date, date]:
         q = current_quarter(start)
         return quarter_bounds(start.year - 1, 4) if q == 1 else quarter_bounds(start.year, q - 1)
     if kind == "Semestre":
-        return semester_bounds(start.year - 1, 2) if current_semester(start) == 1 \
+        return (
+            semester_bounds(start.year - 1, 2)
+            if current_semester(start) == 1
             else semester_bounds(start.year, 1)
+        )
     if kind == "Año":
         return year_bounds(start.year - 1)
     days = (end - start).days + 1
@@ -94,10 +101,21 @@ def range_label(start: date, end: date) -> str:
     return f"{start.strftime('%d-%m-%y')}_a_{end.strftime('%d-%m-%y')}"
 
 
-MONTHS_ES = ["ene", "feb", "mar", "abr", "may", "jun",
-             "jul", "ago", "sep", "oct", "nov", "dic"]
-MONTHS_ES_FULL = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
-                  "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+MONTHS_ES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+MONTHS_ES_FULL = [
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+]
 
 
 def month_label(year_month: str, full: bool = False) -> str:

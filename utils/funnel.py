@@ -5,6 +5,7 @@ Cruza las consultas del mes (bot) con los negocios de Bitrix por teléfono
 más avanzado de ese teléfono. Un negocio perdido cuenta como "cotizado" si
 su etapa anterior ya era de cotización o posterior.
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -51,11 +52,15 @@ def match_deals(consultas: pd.DataFrame, deals: pd.DataFrame) -> pd.DataFrame:
     d = deals[deals["_phone_sig"].astype(str) != ""].copy()
     if d.empty:
         return der
-    d["_rank"] = [stage_rank(e, a) for e, a in
-                  zip(d["Etapa"], d.get("Etapa anterior", pd.Series("", index=d.index)))]
-    best = (d.sort_values("_rank", ascending=False, kind="stable")
-            .drop_duplicates("_phone_sig")
-            .set_index("_phone_sig"))
+    d["_rank"] = [
+        stage_rank(e, a)
+        for e, a in zip(d["Etapa"], d.get("Etapa anterior", pd.Series("", index=d.index)))
+    ]
+    best = (
+        d.sort_values("_rank", ascending=False, kind="stable")
+        .drop_duplicates("_phone_sig")
+        .set_index("_phone_sig")
+    )
     sig = der["_phone_sig"].astype(str)
     hit = sig.isin(best.index) & (sig != "")
     der.loc[hit, "Negocio Bitrix"] = sig[hit].map(best["Nombre negocio"]).values

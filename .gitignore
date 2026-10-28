@@ -33,3 +33,4 @@ data/userfields*.json
 
 # Instrucciones locales para Claude Code
 CLAUDE.md
+.claude/rules/

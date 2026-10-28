@@ -2,18 +2,18 @@
 
 Usa las paletas definidas en utils.branding.
 """
+
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 import pandas as pd
 from pandas.io.formats.style import Styler
 
 from .branding import BITRIX_STAGE_COLORS, CLASSIFICATION_COLORS
 
-
-HIGH_ALPHA = 0.55   # celda del campo "clasificacion"/"etapa"
-LOW_ALPHA = 0.14    # resto de la fila
+HIGH_ALPHA = 0.55  # celda del campo "clasificacion"/"etapa"
+LOW_ALPHA = 0.14  # resto de la fila
 
 
 def _hex_to_rgb(hex_str: str) -> tuple[int, int, int]:
@@ -33,6 +33,7 @@ def _row_styler(color_hex: str, key_col: str) -> callable:
         high = f"background-color: {_rgba(color_hex, HIGH_ALPHA)}; font-weight: 600;"
         low = f"background-color: {_rgba(color_hex, LOW_ALPHA)};"
         return [high if col == key_col else low for col in row.index]
+
     return apply_row
 
 
@@ -40,7 +41,6 @@ def style_bot_table(df: pd.DataFrame, class_col: str = "Clasificacion interna") 
     """Colorea cada fila según su clasificación."""
     if df.empty or class_col not in df.columns:
         return df.style
-    styles = [""] * len(df)
 
     def apply_all(row: pd.Series) -> list[str]:
         cls = str(row.get(class_col, "")).strip()

@@ -12,6 +12,7 @@ Obsidian. Al mostrarlas en la app:
 - Los callouts (``> [!info] Título``) quedan como cita con el título en negrita.
 - El frontmatter YAML se descarta.
 """
+
 from __future__ import annotations
 
 import re
@@ -38,8 +39,10 @@ def anchor(name: str) -> str:
 
 def load_notes(folder: Path) -> dict[str, str]:
     """{nombre de la nota (archivo sin .md): texto sin frontmatter}."""
-    return {p.stem: FRONTMATTER.sub("", p.read_text(encoding="utf-8"))
-            for p in sorted(Path(folder).glob("*.md"))}
+    return {
+        p.stem: FRONTMATTER.sub("", p.read_text(encoding="utf-8"))
+        for p in sorted(Path(folder).glob("*.md"))
+    }
 
 
 def linked_notes(text: str) -> list[str]:

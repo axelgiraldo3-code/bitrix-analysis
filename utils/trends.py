@@ -8,11 +8,12 @@
   mes, por día de semana × hora y por día del mes.
 * ``leader_by_month``: la categoría líder de cada mes y sus casos.
 """
+
 from __future__ import annotations
 
 import calendar
+from collections.abc import Sequence
 from datetime import date, datetime
-from typing import Optional, Sequence
 
 import pandas as pd
 
@@ -23,8 +24,9 @@ WEEKDAYS_ES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", 
 WEEKDAYS_SHORT = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
 
-def leader_trend(series_by_month: Sequence[Optional[pd.Series]],
-                 exclude: set[str] | None = None) -> list[Optional[int]]:
+def leader_trend(
+    series_by_month: Sequence[pd.Series | None], exclude: set[str] | None = None
+) -> list[int | None]:
     """Para la categoría líder del último mes, su cantidad en cada mes.
     Un mes sin datos (``None``) queda como ``None``."""
     if not series_by_month or series_by_month[-1] is None:
@@ -32,7 +34,7 @@ def leader_trend(series_by_month: Sequence[Optional[pd.Series]],
     top, _ = top_category(series_by_month[-1], exclude)
     if top == "—":
         return []
-    out: list[Optional[int]] = []
+    out: list[int | None] = []
     for s in series_by_month:
         if s is None:
             out.append(None)
@@ -53,7 +55,7 @@ def top_with_others(pivot: pd.DataFrame, n: int = 6) -> pd.DataFrame:
     return pd.concat([top, rest])
 
 
-def month_key(d) -> Optional[str]:
+def month_key(d) -> str | None:
     if d is None or pd.isna(d):
         return None
     return f"{d.year:04d}-{d.month:02d}"
@@ -66,8 +68,9 @@ def by_month(dates: pd.Series, months: Sequence[str]) -> list[int]:
     return [int(vc.get(m, 0)) for m in months]
 
 
-def leader_by_month(dates: pd.Series, values: pd.Series,
-                    months: Sequence[str]) -> list[tuple[str, int, int]]:
+def leader_by_month(
+    dates: pd.Series, values: pd.Series, months: Sequence[str]
+) -> list[tuple[str, int, int]]:
     """Para cada 'YYYY-MM' de ``months``: (categoría líder de ese mes, sus
     casos, total del mes). Un mes sin casos da ("—", 0, 0)."""
     keys = dates.map(month_key)
@@ -86,13 +89,17 @@ def _as_datetime(values: pd.Series) -> pd.Series:
 def weekday_hour_cells(dts: pd.Series) -> list[tuple[int, int, int]]:
     """[(hora 0-23, día 0=lunes, cantidad), ...] para las 7 × 24 celdas."""
     d = _as_datetime(dts).dropna()
-    counts = pd.Series(list(zip(d.dt.hour, d.dt.weekday))).value_counts() if not d.empty \
+    counts = (
+        pd.Series(list(zip(d.dt.hour, d.dt.weekday))).value_counts()
+        if not d.empty
         else pd.Series(dtype=int)
+    )
     return [(h, wd, int(counts.get((h, wd), 0))) for wd in range(7) for h in range(24)]
 
 
-def daily_counts(dts: pd.Series, year_month: str,
-                 today: Optional[date] = None) -> tuple[list[date], list[int]]:
+def daily_counts(
+    dts: pd.Series, year_month: str, today: date | None = None
+) -> tuple[list[date], list[int]]:
     """(días, cantidad por día) del mes. En el mes en curso llega hasta hoy."""
     y, m = (int(x) for x in year_month.split("-"))
     last = calendar.monthrange(y, m)[1]
@@ -105,8 +112,9 @@ def daily_counts(dts: pd.Series, year_month: str,
     return days, [int(vc.get(day, 0)) for day in days]
 
 
-def weekday_counts(dts: pd.Series, year_month: str,
-                   today: Optional[date] = None) -> tuple[list[int], list[int]]:
+def weekday_counts(
+    dts: pd.Series, year_month: str, today: date | None = None
+) -> tuple[list[int], list[int]]:
     """(consultas, cantidad de días) por día de la semana (0=lunes) en el mes.
 
     La cantidad de días sirve para el promedio: un mes tiene 4 o 5 de cada

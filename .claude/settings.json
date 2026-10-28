@@ -1,5 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "PYTHONUTF8": "1",
+    "PYTHONIOENCODING": "utf-8"
+  },
   "permissions": {
     "allow": [
       "Bash(python -m pytest:*)",
@@ -15,7 +19,13 @@
       "Bash(git commit:*)",
       "Bash(git fetch:*)",
       "Bash(gh pr view:*)",
-      "Bash(gh pr status:*)"
+      "Bash(gh pr status:*)",
+      "Bash(.venv/Scripts/python.exe -m pytest:*)",
+      "Bash(.venv/Scripts/python.exe -m py_compile:*)",
+      "Bash(.venv/Scripts/python.exe -m ruff:*)",
+      "Bash(.venv/Scripts/ruff.exe:*)",
+      "Bash(git show:*)",
+      "Bash(gh pr checks:*)"
     ],
     "ask": [
       "Bash(git push:*)",
@@ -24,7 +34,8 @@
       "Bash(git stash:*)",
       "Bash(git pull:*)",
       "Bash(git reset:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(.venv/Scripts/python.exe -m pip install:*)"
     ],
     "deny": [
       "Read(./.streamlit/secrets.toml)",
@@ -42,7 +53,10 @@
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command", "command": "python .claude/hooks/check_py.py" }
+          {
+            "type": "command",
+            "command": "python .claude/hooks/check_py.py"
+          }
         ]
       }
     ]

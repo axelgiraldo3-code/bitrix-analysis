@@ -9,17 +9,16 @@
 En Streamlit Cloud el disco es efímero pero dura mientras el container vive
 (horas típicamente). En local sobrevive reinicios de la app.
 """
+
 from __future__ import annotations
 
 import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import streamlit as st
-
 
 PENDING_FILE = Path("data") / "pending_changes.json"
 _STATE_KEY = "pending_changes"
@@ -39,7 +38,8 @@ def _read_disk() -> dict[str, dict]:
             return {}
         # Filtrar entradas malformadas
         return {
-            str(k): v for k, v in data.items()
+            str(k): v
+            for k, v in data.items()
             if isinstance(v, dict) and "Clasificacion interna" in v
         }
     except (json.JSONDecodeError, OSError):
@@ -133,15 +133,16 @@ def as_dataframe() -> pd.DataFrame:
     """Vista tabular de la cola para mostrar 'ver pendientes'."""
     p = get()
     if not p:
-        return pd.DataFrame(columns=["Numero", "Nombre", "Fecha",
-                                     "Clasificacion interna", "ts"])
+        return pd.DataFrame(columns=["Numero", "Nombre", "Fecha", "Clasificacion interna", "ts"])
     rows = []
     for num, v in p.items():
-        rows.append({
-            "Numero": num,
-            "Nombre": v.get("Nombre", ""),
-            "Fecha": v.get("Fecha", ""),
-            "Clasificacion interna": v.get("Clasificacion interna", ""),
-            "ts": v.get("ts", ""),
-        })
+        rows.append(
+            {
+                "Numero": num,
+                "Nombre": v.get("Nombre", ""),
+                "Fecha": v.get("Fecha", ""),
+                "Clasificacion interna": v.get("Clasificacion interna", ""),
+                "ts": v.get("ts", ""),
+            }
+        )
     return pd.DataFrame(rows).sort_values("ts", ascending=False)

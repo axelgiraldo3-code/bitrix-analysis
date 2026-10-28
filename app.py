@@ -6,6 +6,7 @@ Ejecutar localmente:
 Estructura: este archivo arma la página (estilos, datos comunes, barra
 lateral y navegación); cada página está en ``views/``.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -46,17 +47,36 @@ if _recovered:
 
 
 # --- Navegación (antes de cargar datos: la Ayuda no los necesita) ----------
-page = st.navigation([
-    st.Page(reporte.render, title="Reporte mensual", icon=":material/insights:",
-            url_path="reporte", default=True),
-    st.Page(negocios.render, title="Negocios Bitrix24", icon=":material/handshake:",
-            url_path="negocios"),
-    st.Page(clasificacion.render, title="Clasificación manual", icon=":material/fact_check:",
-            url_path="clasificacion"),
-    st.Page(analisis.render, title="Análisis preliminar", icon=":material/science:",
-            url_path="analisis"),
-    st.Page(ayuda.render, title="Ayuda", icon=":material/help:", url_path="ayuda"),
-])
+page = st.navigation(
+    [
+        st.Page(
+            reporte.render,
+            title="Reporte mensual",
+            icon=":material/insights:",
+            url_path="reporte",
+            default=True,
+        ),
+        st.Page(
+            negocios.render,
+            title="Negocios Bitrix24",
+            icon=":material/handshake:",
+            url_path="negocios",
+        ),
+        st.Page(
+            clasificacion.render,
+            title="Clasificación manual",
+            icon=":material/fact_check:",
+            url_path="clasificacion",
+        ),
+        st.Page(
+            analisis.render,
+            title="Análisis preliminar",
+            icon=":material/science:",
+            url_path="analisis",
+        ),
+        st.Page(ayuda.render, title="Ayuda", icon=":material/help:", url_path="ayuda"),
+    ]
+)
 # La Ayuda abre aunque no se puedan leer los datos (sin filtros ni panel de datos)
 if page.url_path == "ayuda":
     page.run()
@@ -120,8 +140,13 @@ with st.sidebar:
         with st.expander("Ver pendientes"):
             st.dataframe(pending.as_dataframe(), hide_index=True, width="stretch")
         sync_col, disc_col = st.columns(2)
-        if sync_col.button("Sincronizar", icon=":material/upload:", type="primary",
-                           key="pending_sync", width="stretch"):
+        if sync_col.button(
+            "Sincronizar",
+            icon=":material/upload:",
+            type="primary",
+            key="pending_sync",
+            width="stretch",
+        ):
             _sync_pending()
         if disc_col.button("Descartar", key="pending_discard", width="stretch"):
             pending.clear()
@@ -137,27 +162,37 @@ with st.sidebar:
             raise
         last_sync, sync_unknown = None, True
     if sync_unknown:
-        st.caption(f":material/hourglass_empty: Bitrix {_mes}: estado no disponible "
-                   "(cuota de Google Sheets, reintentá en un minuto)")
+        st.caption(
+            f":material/hourglass_empty: Bitrix {_mes}: estado no disponible "
+            "(cuota de Google Sheets, reintentá en un minuto)"
+        )
     elif last_sync:
         age_days = (datetime.now() - last_sync).days
         if age_days < data.snapshot_ttl_days(_mes):
             icon, state = ":material/check_circle:", "al día"
         else:
             icon, state = ":material/schedule:", "desactualizado"
-        st.caption(f"{icon} Bitrix {_mes}: {state} "
-                   f"(sync {last_sync.strftime('%d-%m-%y %H:%M')}, hace {age_days} d)")
+        st.caption(
+            f"{icon} Bitrix {_mes}: {state} "
+            f"(sync {last_sync.strftime('%d-%m-%y %H:%M')}, hace {age_days} d)"
+        )
     else:
         st.caption(f":material/cloud_off: Bitrix {_mes}: sin snapshot")
-    if st.button("Recargar Bitrix desde API", width="stretch",
-                 help="Fuerza traer los negocios del mes desde Bitrix24 "
-                      "(ignora el snapshot). Se refresca solo cada 7 días (mes en curso "
-                      "y anterior) o 30 días (meses más viejos)."):
+    if st.button(
+        "Recargar Bitrix desde API",
+        width="stretch",
+        help="Fuerza traer los negocios del mes desde Bitrix24 "
+        "(ignora el snapshot). Se refresca solo cada 7 días (mes en curso "
+        "y anterior) o 30 días (meses más viejos).",
+    ):
         st.session_state["_force_month"] = True
         st.rerun()
-    if st.button("Actualizar índice de teléfonos", width="stretch",
-                 help="Vuelve a leer los teléfonos de todos los negocios de venta "
-                      "(se usa para clasificar DERIVADO A BITRIX). Se refresca solo cada 7 días."):
+    if st.button(
+        "Actualizar índice de teléfonos",
+        width="stretch",
+        help="Vuelve a leer los teléfonos de todos los negocios de venta "
+        "(se usa para clasificar DERIVADO A BITRIX). Se refresca solo cada 7 días.",
+    ):
         st.session_state["_force_index"] = True
         st.rerun()
     if st.button("Limpiar caché", width="stretch"):

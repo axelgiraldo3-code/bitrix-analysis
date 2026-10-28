@@ -1,8 +1,9 @@
 """Cliente REST para la API de Bitrix24 (Webhook entrante)."""
+
 from __future__ import annotations
 
 import time
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlencode
 
 import pandas as pd
@@ -22,10 +23,10 @@ _last_call_ts = 0.0
 # canónicos usados en branding.py (BITRIX_STAGE_ORDER / BITRIX_STAGE_COLORS).
 STAGE_NAME_NORMALIZE = {
     "Cotizado aguardando devolucion": "Cotizado aguardando devolución",
-    "En negociacion":                 "En negociación",
-    "En Negociacion":                 "En negociación",
-    "Ganado en desarrollo":           "Ganado en Desarrollo",
-    "Cerrado Perdido, motivo?":       "Cerrado Perdido",
+    "En negociacion": "En negociación",
+    "En Negociacion": "En negociación",
+    "Ganado en desarrollo": "Ganado en Desarrollo",
+    "Cerrado Perdido, motivo?": "Cerrado Perdido",
 }
 
 
@@ -33,17 +34,17 @@ STAGE_NAME_NORMALIZE = {
 # el portal de Cotear. Se usa como fallback si `fetch_stage_map()` falla.
 STAGE_NAME_ALIASES = {
     # Pipeline 0 - Ventas de máquinas
-    "UC_U0Q3CX":          "Pendiente de cotizar",
-    "NEW":                "Cotizado aguardando devolución",
+    "UC_U0Q3CX": "Pendiente de cotizar",
+    "NEW": "Cotizado aguardando devolución",
     "PREPAYMENT_INVOICE": "En negociación",
-    "EXECUTING":          "Ganado en Desarrollo",
-    "WON":                "Cerrado Ganado",
-    "LOSE":               "Cerrado Perdido",
+    "EXECUTING": "Ganado en Desarrollo",
+    "WON": "Cerrado Ganado",
+    "LOSE": "Cerrado Perdido",
     # Pipeline 15 - Archivadas (donde también hay deals viejos de venta)
-    "C15:NEW":            "No Aprobados",
-    "C15:WON":            "Cerrado Ganado",
-    "C15:LOSE":           "Cerrado Perdido",
-    "C15:APOLOGY":        "Analizar la falla",
+    "C15:NEW": "No Aprobados",
+    "C15:WON": "Cerrado Ganado",
+    "C15:LOSE": "Cerrado Perdido",
+    "C15:APOLOGY": "Analizar la falla",
 }
 
 # Tipo de negociación y pipeline de "Venta de máquinas".
@@ -59,8 +60,17 @@ REASON_UF_CANDIDATES: list[str] = [
 # Campos que la app usa de cada deal (pedir "*" + "UF_*" multiplicaba el
 # tamaño de cada respuesta).
 DEAL_SELECT = [
-    "ID", "TITLE", "TYPE_ID", "CATEGORY_ID", "STAGE_ID", "STAGE_SEMANTIC_ID",
-    "DATE_CREATE", "MOVED_TIME", "CONTACT_ID", "COMPANY_ID", "SOURCE_ID",
+    "ID",
+    "TITLE",
+    "TYPE_ID",
+    "CATEGORY_ID",
+    "STAGE_ID",
+    "STAGE_SEMANTIC_ID",
+    "DATE_CREATE",
+    "MOVED_TIME",
+    "CONTACT_ID",
+    "COMPANY_ID",
+    "SOURCE_ID",
     *REASON_UF_CANDIDATES,
 ]
 
@@ -117,7 +127,7 @@ def _batch_call(commands: dict[str, tuple[str, dict]], chunk_size: int = 50) -> 
     results: dict[str, Any] = {}
     keys = list(commands.keys())
     for i in range(0, len(keys), chunk_size):
-        chunk = keys[i:i + chunk_size]
+        chunk = keys[i : i + chunk_size]
         cmd = {}
         for key in chunk:
             method, params = commands[key]
@@ -143,7 +153,7 @@ def fetch_stage_map() -> dict[str, str]:
         commands = {f"s{cid}": ("crm.dealcategory.stage.list", {"id": cid}) for cid in cat_ids}
         results = _batch_call(commands)
         for cid in cat_ids:
-            for s in (results.get(f"s{cid}") or []):
+            for s in results.get(f"s{cid}") or []:
                 mp[str(s["STATUS_ID"])] = str(s.get("NAME", ""))
     except Exception:
         pass
@@ -170,20 +180,20 @@ def fetch_userfield_options() -> dict[str, dict[str, str]]:
 # Etiquetas para SOURCE_ID estándar de Bitrix cuando el portal no personalizó
 # los labels. Se sobreescriben por `fetch_source_map()` si la llamada funciona.
 SOURCE_DEFAULT_LABELS = {
-    "CALL":        "Llamada",
-    "EMAIL":       "Email",
-    "WEB":         "Sitio Web",
+    "CALL": "Llamada",
+    "EMAIL": "Email",
+    "WEB": "Sitio Web",
     "ADVERTISING": "Publicidad",
-    "PARTNER":     "Referido",
+    "PARTNER": "Referido",
     "RECOMMENDATION": "Recomendación",
-    "TRADE_SHOW":  "Feria / Exposición",
-    "WEBFORM":     "Formulario web",
-    "CALLBACK":    "Callback",
-    "RSS":         "RRSS",
-    "OTHER":       "Otro",
-    "UC_MOB_APP":  "App móvil",
-    "STORE":       "Tienda",
-    "SELF":        "Propio",
+    "TRADE_SHOW": "Feria / Exposición",
+    "WEBFORM": "Formulario web",
+    "CALLBACK": "Callback",
+    "RSS": "RRSS",
+    "OTHER": "Otro",
+    "UC_MOB_APP": "App móvil",
+    "STORE": "Tienda",
+    "SELF": "Propio",
 }
 
 
@@ -206,13 +216,15 @@ def fetch_source_map() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Etapas
 # ---------------------------------------------------------------------------
-def _stage_label(stage_id: str, semantic: str = "", dyn_map: Optional[dict[str, str]] = None) -> str:
+def _stage_label(stage_id: str, semantic: str = "", dyn_map: dict[str, str] | None = None) -> str:
     """Traduce STAGE_ID a nombre canónico (normalizado)."""
     raw = _stage_label_raw(stage_id, semantic, dyn_map)
     return STAGE_NAME_NORMALIZE.get(raw, raw)
 
 
-def _stage_label_raw(stage_id: str, semantic: str = "", dyn_map: Optional[dict[str, str]] = None) -> str:
+def _stage_label_raw(
+    stage_id: str, semantic: str = "", dyn_map: dict[str, str] | None = None
+) -> str:
     """Traduce STAGE_ID a nombre. Usa mapa dinámico > aliases hardcoded > semantic."""
     if not stage_id and not semantic:
         return ""
@@ -242,12 +254,15 @@ def fetch_previous_stages(deals: list[dict]) -> dict[str, str]:
     if not current:
         return {}
     commands = {
-        f"h{did}": ("crm.stagehistory.list", {
-            "entityTypeId": 2,
-            "order": {"ID": "DESC"},
-            "filter": {"OWNER_ID": did},
-            "select": ["ID", "STAGE_ID"],
-        })
+        f"h{did}": (
+            "crm.stagehistory.list",
+            {
+                "entityTypeId": 2,
+                "order": {"ID": "DESC"},
+                "filter": {"OWNER_ID": did},
+                "select": ["ID", "STAGE_ID"],
+            },
+        )
         for did in current
     }
     out: dict[str, str] = {}
@@ -273,11 +288,10 @@ def _month_bounds(year_month: str) -> tuple[str, str]:
     year, month = (int(x) for x in year_month.split("-"))
     ny = year + (1 if month == 12 else 0)
     nm = 1 if month == 12 else month + 1
-    return (f"{year:04d}-{month:02d}-01T00:00:00",
-            f"{ny:04d}-{nm:02d}-01T00:00:00")
+    return (f"{year:04d}-{month:02d}-01T00:00:00", f"{ny:04d}-{nm:02d}-01T00:00:00")
 
 
-def _paginate_deals(filter_dict: dict, select: Optional[list[str]] = None) -> list[dict]:
+def _paginate_deals(filter_dict: dict, select: list[str] | None = None) -> list[dict]:
     """crm.deal.list completo: la primera página da el total y el resto se
     pide en batch (hasta 50 páginas por llamada)."""
     params = {
@@ -341,7 +355,7 @@ def _list_by_ids(method: str, ids: list[str], select: list[str]) -> list[dict]:
     valid = sorted({str(c) for c in ids if c and str(c) != "0"})
     if not valid:
         return []
-    chunks = [valid[i:i + 50] for i in range(0, len(valid), 50)]
+    chunks = [valid[i : i + 50] for i in range(0, len(valid), 50)]
     commands = {
         f"q{i}": (method, {"filter": {"ID": chunk}, "select": select})
         for i, chunk in enumerate(chunks)
@@ -359,7 +373,8 @@ def _list_by_ids(method: str, ids: list[str], select: list[str]) -> list[dict]:
 def fetch_contacts(contact_ids: list[str]) -> dict[str, dict]:
     """Trae {id: {name, phone}} de contactos."""
     rows = _list_by_ids(
-        "crm.contact.list", contact_ids,
+        "crm.contact.list",
+        contact_ids,
         ["ID", "NAME", "SECOND_NAME", "LAST_NAME", "PHONE", "EMAIL"],
     )
     return {str(c.get("ID")): _parse_contact(c) for c in rows}
@@ -372,14 +387,24 @@ def fetch_companies(company_ids: list[str]) -> dict[str, str]:
 
 
 DEAL_COLUMNS_OUT = [
-    "ID negocio", "Fecha creacion", "Fecha movimiento", "Nuevo",
-    "Nombre negocio", "Tipo maquinaria", "Etapa", "Etapa anterior",
-    "Cliente", "Compania", "Telefono", "Fuente", "Motivo de baja",
+    "ID negocio",
+    "Fecha creacion",
+    "Fecha movimiento",
+    "Nuevo",
+    "Nombre negocio",
+    "Tipo maquinaria",
+    "Etapa",
+    "Etapa anterior",
+    "Cliente",
+    "Compania",
+    "Telefono",
+    "Fuente",
+    "Motivo de baja",
     "_phone_sig",
 ]
 
 
-def deals_to_dataframe(deals: list[dict], year_month: Optional[str] = None) -> pd.DataFrame:
+def deals_to_dataframe(deals: list[dict], year_month: str | None = None) -> pd.DataFrame:
     """Filtra a 'Venta de máquinas' y normaliza campos.
 
     year_month (YYYY-MM): si se pasa, la columna 'Nuevo' marca los deals cuya
@@ -412,8 +437,12 @@ def deals_to_dataframe(deals: list[dict], year_month: Optional[str] = None) -> p
 
     # Bitrix devuelve '2026-10-03T10:00:00+03:00': se usa la hora del portal
     # (primeros 19 caracteres) para no correr la fecha al convertir a UTC.
-    fecha_series = pd.to_datetime(col("DATE_CREATE").reindex(df.index).str.slice(0, 19), errors="coerce")
-    moved_series = pd.to_datetime(col("MOVED_TIME").reindex(df.index).str.slice(0, 19), errors="coerce")
+    fecha_series = pd.to_datetime(
+        col("DATE_CREATE").reindex(df.index).str.slice(0, 19), errors="coerce"
+    )
+    moved_series = pd.to_datetime(
+        col("MOVED_TIME").reindex(df.index).str.slice(0, 19), errors="coerce"
+    )
 
     if year_month:
         y, m = (int(x) for x in year_month.split("-"))
@@ -432,8 +461,7 @@ def deals_to_dataframe(deals: list[dict], year_month: Optional[str] = None) -> p
     prev_ids = fetch_previous_stages(df.to_dict("records"))
     deal_ids = col("ID").reindex(df.index).fillna("").tolist()
     etapas_prev = [
-        _stage_label(prev_ids[d], "", stage_map) if d in prev_ids else ""
-        for d in deal_ids
+        _stage_label(prev_ids[d], "", stage_map) if d in prev_ids else "" for d in deal_ids
     ]
 
     # Motivo de baja: REASON (si el portal lo expone) y luego los UF configurados
@@ -455,19 +483,21 @@ def deals_to_dataframe(deals: list[dict], year_month: Optional[str] = None) -> p
     source_ids = col("SOURCE_ID").reindex(df.index).fillna("").tolist()
     fuentes = [source_map.get(sid, sid) if sid else "" for sid in source_ids]
 
-    out = pd.DataFrame({
-        "ID negocio":       deal_ids,
-        "Fecha creacion":   fecha_series.dt.strftime("%d-%m-%y").fillna("").tolist(),
-        "Fecha movimiento": moved_series.dt.strftime("%d-%m-%y").fillna("").tolist(),
-        "Nuevo":            ["Sí" if n else "" for n in nuevos.tolist()],
-        "Nombre negocio":   col("TITLE").reindex(df.index).fillna("").tolist(),
-        "Etapa":            etapas,
-        "Etapa anterior":   etapas_prev,
-        "Cliente":          clientes,
-        "Compania":         companias,
-        "Fuente":           fuentes,
-        "Motivo de baja":   motivos,
-    })
+    out = pd.DataFrame(
+        {
+            "ID negocio": deal_ids,
+            "Fecha creacion": fecha_series.dt.strftime("%d-%m-%y").fillna("").tolist(),
+            "Fecha movimiento": moved_series.dt.strftime("%d-%m-%y").fillna("").tolist(),
+            "Nuevo": ["Sí" if n else "" for n in nuevos.tolist()],
+            "Nombre negocio": col("TITLE").reindex(df.index).fillna("").tolist(),
+            "Etapa": etapas,
+            "Etapa anterior": etapas_prev,
+            "Cliente": clientes,
+            "Compania": companias,
+            "Fuente": fuentes,
+            "Motivo de baja": motivos,
+        }
+    )
 
     out["Tipo maquinaria"] = out["Nombre negocio"].map(classify_machinery)
 
@@ -499,15 +529,22 @@ def fetch_phone_index() -> pd.DataFrame:
         title = str(d.get("TITLE") or "").strip()
         if cid and cid != "0" and title and title not in titles_by_contact.get(cid, []):
             titles_by_contact.setdefault(cid, []).append(title)
-    contacts = fetch_contacts(list(titles_by_contact) or
-                              [str(d.get("CONTACT_ID") or "") for d in deals])
+    contacts = fetch_contacts(
+        list(titles_by_contact) or [str(d.get("CONTACT_ID") or "") for d in deals]
+    )
     rows = []
     for cid, c in contacts.items():
         tel = format_ar(c.get("phone", ""))
         sig = significant_ar(tel)
         if sig:
-            rows.append({"_phone_sig": sig, "Cliente": c.get("name", ""), "Telefono": tel,
-                         "Negocio": " | ".join(titles_by_contact.get(cid, []))})
+            rows.append(
+                {
+                    "_phone_sig": sig,
+                    "Cliente": c.get("name", ""),
+                    "Telefono": tel,
+                    "Negocio": " | ".join(titles_by_contact.get(cid, [])),
+                }
+            )
     if not rows:
         return pd.DataFrame(columns=PHONE_INDEX_COLUMNS)
     return pd.DataFrame(rows).drop_duplicates("_phone_sig")[PHONE_INDEX_COLUMNS]

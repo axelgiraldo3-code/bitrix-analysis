@@ -1,4 +1,5 @@
 """Página "Clasificación manual": revisar y reclasificar los reportes del mes."""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -20,9 +21,13 @@ def _body(month_df: pd.DataFrame) -> None:
 
     with ui.card("picker", "Reportes del mes", "Seleccioná un contacto para clasificar"):
         event = st.dataframe(
-            style_bot_table(picker_df), hide_index=True, width="stretch",
+            style_bot_table(picker_df),
+            hide_index=True,
+            width="stretch",
             height=min(38 * (len(picker_df) + 1) + 3, 420),
-            on_select="rerun", selection_mode="single-row", key="picker_table",
+            on_select="rerun",
+            selection_mode="single-row",
+            key="picker_table",
         )
     sel_rows = event.selection.rows if event.selection else []
     if not sel_rows:
@@ -43,20 +48,32 @@ def _body(month_df: pd.DataFrame) -> None:
                 f"""
 | Número | Nombre | Fecha | Área de interés |
 |---|---|---|---|
-| **{row['Numero']}** | {row['Nombre'] or '—'} | {row['Fecha']} | {row['Area de interes'] or '—'} |
+| **{row["Numero"]}** | {row["Nombre"] or "—"} | {row["Fecha"]} | {row["Area de interes"] or "—"} |
 """
             )
         with cls_col:
-            new_class = st.selectbox("Clasificación interna", CLASSIFICATION_OPTIONS,
-                                     index=default_idx, key=f"class_select_{row['Numero']}")
+            new_class = st.selectbox(
+                "Clasificación interna",
+                CLASSIFICATION_OPTIONS,
+                index=default_idx,
+                key=f"class_select_{row['Numero']}",
+            )
         with btn_col:
-            if st.button("Guardar", icon=":material/save:", key=f"save_{row['Numero']}",
-                         type="primary", help="Guardar clasificación"):
-                pending.add(str(row["Numero"]), {
-                    "Fecha": row["Fecha"],
-                    "Nombre": row["Nombre"],
-                    "Clasificacion interna": new_class,
-                })
+            if st.button(
+                "Guardar",
+                icon=":material/save:",
+                key=f"save_{row['Numero']}",
+                type="primary",
+                help="Guardar clasificación",
+            ):
+                pending.add(
+                    str(row["Numero"]),
+                    {
+                        "Fecha": row["Fecha"],
+                        "Nombre": row["Nombre"],
+                        "Clasificacion interna": new_class,
+                    },
+                )
                 st.toast(f"En cola: {row['Numero']} → {new_class}", icon=":material/inbox:")
                 st.rerun(scope="app")
 
@@ -67,14 +84,20 @@ def _body(month_df: pd.DataFrame) -> None:
                 st.rerun(scope="app")
 
         st.markdown("**Resumen de la consulta**")
-        st.text_area("Resumen", value=row["Resumen general"], height=220,
-                     label_visibility="collapsed", disabled=True)
+        st.text_area(
+            "Resumen",
+            value=row["Resumen general"],
+            height=220,
+            label_visibility="collapsed",
+            disabled=True,
+        )
 
 
 def render() -> None:
     month = month_filter(st.session_state["_months_bot"])
-    ui.page_header("Clasificación manual",
-                   f"Reportes del bot · {periods.month_label(month, full=True)}")
+    ui.page_header(
+        "Clasificación manual", f"Reportes del bot · {periods.month_label(month, full=True)}"
+    )
     month_df = data.current_month(st.session_state["_bot_raw"], month)
     if month_df.empty:
         st.info("Sin reportes en el mes seleccionado.")
