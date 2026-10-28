@@ -7,15 +7,16 @@ import unicodedata
 COTEAR_BLUE = "#01498E"
 COTEAR_GRAY = "#7B868C"
 
-# Paleta para categorías de clasificación interna (10 slots)
+# Clasificación interna: un color propio por categoría, de la paleta de series.
+# Fríos para lo derivado (útil o neutro), cálidos para lo que no prospera.
 CLASSIFICATION_COLORS = {
-    "DERIVADO A BITRIX": "#11734b",
-    "VENTA DE REPUESTOS": "#0a53a8",
-    "DERIVADO A RRHH": "#ee00ff",
-    "DERIVADO A TÉCNICA": "#5a3286",
-    "SIN RESPUESTAS": "#ffe5a0",
+    "DERIVADO A BITRIX": "#11734B",
+    "VENTA DE REPUESTOS": "#01498E",
+    "DERIVADO A RRHH": "#2BB3A3",
+    "DERIVADO A TÉCNICA": "#5A3286",
+    "SIN RESPUESTAS": "#C9A400",
     "NECESIDAD INCOMPATIBLE": "#E67E22",
-    "SIN INTERES": "#b10202",
+    "SIN INTERES": "#B10202",
     "SIN CLASIFICAR": "#BDC3C7",
 }
 
@@ -29,17 +30,18 @@ BITRIX_STAGE_ORDER = [
     "Cerrado Perdido",
 ]
 
+# Tonos heredados de Bitrix24, con menos saturación para no verse neón.
 BITRIX_STAGE_COLORS = {
-    "Pendiente de cotizar": "#ace9fb",
-    "Cotizado aguardando devolución": "#39a8ef",
-    "Cotizado aguardando devolucion": "#39a8ef",
-    "En negociacion": "#55d0e0",
-    "En negociación": "#55d0e0",
-    "Ganado en Desarrollo": "#47e4c2",
-    "Ganado en desarrollo": "#47e4c2",
-    "Cerrado Ganado": "#7bd500",
-    "Cerrado Perdido, motivo?": "#f11716",
-    "Cerrado Perdido": "#f11716",
+    "Pendiente de cotizar": "#9FD9EE",
+    "Cotizado aguardando devolución": "#2E90D1",
+    "Cotizado aguardando devolucion": "#2E90D1",
+    "En negociacion": "#3AB5C5",
+    "En negociación": "#3AB5C5",
+    "Ganado en Desarrollo": "#2DB393",
+    "Ganado en desarrollo": "#2DB393",
+    "Cerrado Ganado": "#67A81E",
+    "Cerrado Perdido, motivo?": "#CF2E2E",
+    "Cerrado Perdido": "#CF2E2E",
 }
 
 
