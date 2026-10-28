@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 
 import streamlit as st
 
@@ -19,7 +20,8 @@ from views import analisis, ayuda, clasificacion, negocios, reporte
 
 st.set_page_config(
     page_title="COTEAR · Informe de Actividad Comercial",
-    page_icon=":material/insights:",
+    # Ícono propio (fondo azul Cotear): el de Material se pierde en pestañas oscuras
+    page_icon=str(Path(__file__).parent / "assets" / "favicon.png"),
     layout="wide",
     initial_sidebar_state="expanded",
 )
