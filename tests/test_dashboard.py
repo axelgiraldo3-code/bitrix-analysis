@@ -100,7 +100,10 @@ def test_charts_are_json_and_have_png_export():
 
 
 def test_labels_readable_on_their_color():
-    for color in ["#01498E", "#ffe5a0", "#ee00ff", "#E67E22", "#BDC3C7", "#11734b"]:
+    from utils.branding import BITRIX_STAGE_COLORS, CLASSIFICATION_COLORS
+
+    palette = [*CLASSIFICATION_COLORS.values(), *BITRIX_STAGE_COLORS.values()]
+    for color in ["#ffe5a0", "#ee00ff", *palette]:
         assert charts.contrast_ratio(charts.label_color(color), color) >= 4.5
 
 

@@ -107,7 +107,7 @@ def _toolbox(filename: str) -> dict:
 
 def _base(filename: str) -> dict:
     return {
-        "animationDuration": 500,
+        "animationDuration": 300,
         "textStyle": {"color": TEXT},
         "toolbox": _toolbox(filename),
         "tooltip": {"confine": True},

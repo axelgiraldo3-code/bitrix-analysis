@@ -138,24 +138,24 @@ def inject_css() -> None:
       }}
       div[class*="st-key-flip_"] > div {{ grid-area: 1 / 1; width: 100%; min-width: 0; }}
       div[class*="st-key-front_"], div[class*="st-key-back_"] {{
-        transition: transform .55s cubic-bezier(.4, 0, .2, 1), opacity .45s ease,
+        transition: transform .3s cubic-bezier(.4, 0, .2, 1), opacity .25s ease,
                     visibility 0s linear 0s;
       }}
       div[class*="st-key-back_"] {{
         transform: scale(.97); opacity: 0; visibility: hidden; pointer-events: none;
-        transition: transform .55s cubic-bezier(.4, 0, .2, 1), opacity .45s ease,
-                    visibility 0s linear .55s;
+        transition: transform .3s cubic-bezier(.4, 0, .2, 1), opacity .25s ease,
+                    visibility 0s linear .3s;
       }}
       div[class*="st-key-card_"]:has([class*="st-key-view_"] button[role="radio"]:nth-of-type(2)[aria-checked="true"])
         div[class*="st-key-front_"] {{
         transform: translateX(-104%); opacity: 0; visibility: hidden; pointer-events: none;
-        transition: transform .55s cubic-bezier(.4, 0, .2, 1), opacity .45s ease,
-                    visibility 0s linear .55s;
+        transition: transform .3s cubic-bezier(.4, 0, .2, 1), opacity .25s ease,
+                    visibility 0s linear .3s;
       }}
       div[class*="st-key-card_"]:has([class*="st-key-view_"] button[role="radio"]:nth-of-type(2)[aria-checked="true"])
         div[class*="st-key-back_"] {{
         transform: none; opacity: 1; visibility: visible; pointer-events: auto;
-        transition: transform .55s cubic-bezier(.4, 0, .2, 1) .1s, opacity .45s ease .1s,
+        transition: transform .3s cubic-bezier(.4, 0, .2, 1) .05s, opacity .25s ease .05s,
                     visibility 0s linear 0s;
       }}
 
