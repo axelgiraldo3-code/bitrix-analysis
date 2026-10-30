@@ -70,6 +70,12 @@ El selector cambia a barras segmentadas: cada fuente se divide según la etapa e
 
 Mapa con el porcentaje de negocios por provincia. El selector de la tarjeta permite verlo en barras.
 
+### Por campaña
+
+Negocios de clientes que llegaron por un anuncio, según la "Información de origen" cargada en el contacto de Bitrix (por ejemplo, "Anuncio de Facebook, campaña tornos convencionales"). Las variantes de escritura de una misma campaña se agrupan ("corte láser" y "cortadoras láser" cuentan como Cortadora láser).
+
+El selector cambia la vista: Total muestra cuántos negocios trajo cada campaña; Por red los divide entre Facebook e Instagram; Por etapa muestra en qué etapa están hoy, para ver qué campañas traen negocios que avanzan.
+
 ## Lista de negocios
 
 La tabla desplegable al final lista todos los negocios del período con sus datos principales y permite descargarlos.
