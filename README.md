@@ -74,7 +74,8 @@ página abierta.
   KPIs se comparan con el período anterior de igual duración (mes, trimestre o
   año anterior; en un rango, los mismos días justo antes). Tipo de máquina ×
   etapa (cantidad ⇄ %), motivos de baja (torta ⇄ barras), fuentes (sólidas ⇄
-  apiladas por etapa), mapa + ranking de provincias y lista de negocios (columna Tipo maquinaria oculta).
+  apiladas por etapa), mapa + ranking de provincias, campañas de anuncios
+  (total ⇄ por red ⇄ por etapa) y lista de negocios (columna Tipo maquinaria oculta).
 - **Clasificación manual**: selección de un reporte y guardado en cola; el
   botón *Sincronizar* de la barra lateral lo escribe en Sheets.
 - **Análisis preliminar**: embudo consultas → derivadas → cotizadas → ganadas

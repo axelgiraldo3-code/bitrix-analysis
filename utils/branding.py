@@ -82,6 +82,10 @@ SOURCE_OTHER_COLOR = COTEAR_GRAY
 SOURCE_EMPTY = "Sin fuente"
 
 
+# Red del anuncio de las campañas (utils/campaigns.py)
+NETWORK_COLORS = {"Facebook": "#01498E", "Instagram": "#D35FB7", "Otra": COTEAR_GRAY}
+
+
 def _plain(text: str) -> str:
     t = unicodedata.normalize("NFKD", str(text).strip().lower())
     return " ".join("".join(c for c in t if not unicodedata.combining(c)).split())

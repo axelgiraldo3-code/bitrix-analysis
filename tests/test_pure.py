@@ -540,3 +540,52 @@ def test_weekday_counts():
     assert sum(n_days) == 30 and n_days[0] == 4 and n_days[1] == 5
     _, n_days = weekday_counts(dts, "2026-10", today=date(2026, 10, 3))
     assert sum(n_days) == 3  # mes en curso: hasta hoy
+
+
+# --- campañas de anuncios -----------------------------------------------------
+@pytest.mark.parametrize(
+    "origin, network, campaign",
+    [
+        ("Anuncio de Instagram, campaña tornos convencionales", "Instagram", "Torno convencional"),
+        ("Anuncio de Facebook, campaña de tornos convencionales", "Facebook", "Torno convencional"),
+        ("Anuncio de Facebook, tornos convencionales", "Facebook", "Torno convencional"),
+        ("Anuncio de instagram, campaña cortadoras láser", "Instagram", "Cortadora láser"),
+        ("Anuncio de Facebook, campaña corte láser", "Facebook", "Cortadora láser"),
+        ("Anuncio de Facebook, campaña centros de mecanizado", "Facebook", "Centro de mecanizado"),
+        ("Anuncio de Facebook, campaña del torno Topway", "Facebook", "Torno Topway"),
+        ("Anuncio de Facebook, campaña torno CNC topway", "Facebook", "Torno CNC Topway"),
+        ("Anuncio de Facebook", "Facebook", "Sin campaña"),
+        ("Anuncio de TikTok, campaña plegadoras", "Otra", "Plegadora"),
+        ("Recomendación de un cliente", "", ""),
+        ("", "", ""),
+        (None, "", ""),
+    ],
+)
+def test_campaign_from_origin(origin, network, campaign):
+    from utils.campaigns import ad_network, campaign_name
+
+    assert ad_network(origin) == network
+    assert campaign_name(origin) == campaign
+
+
+def test_campaign_laser_always_accented():
+    from utils.campaigns import campaign_name
+
+    assert campaign_name("Anuncio de Facebook, campaña tubo laser") == "Tubo láser"
+    assert campaign_name("Anuncio de Facebook, campaña tubos LÁSER") == "Tubo láser"
+    assert campaign_name("Anuncio de Facebook, campaña láser CNC") == "Láser CNC"
+
+
+def test_unify_spelling_joins_accent_variants():
+    from utils.campaigns import unify_spelling
+
+    s = pd.Series(
+        ["Plegadora hidraulica", "Plegadora hidraulica", "Plegadora hidráulica", "", "Torno"]
+    )
+    assert unify_spelling(s).tolist() == [
+        "Plegadora hidráulica",
+        "Plegadora hidráulica",
+        "Plegadora hidráulica",
+        "",
+        "Torno",
+    ]

@@ -78,6 +78,7 @@ BITRIX_HEADERS = [
     "Telefono",
     "Fuente",
     "Motivo de baja",
+    "Origen",
 ]
 
 

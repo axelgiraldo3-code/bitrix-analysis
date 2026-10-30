@@ -347,7 +347,9 @@ def _parse_contact(c: dict) -> dict:
         for x in (c.get("NAME", ""), c.get("SECOND_NAME", ""), c.get("LAST_NAME", ""))
         if x
     ).strip()
-    return {"name": name, "phone": phone}
+    # "Información de origen": texto libre ("Anuncio de Facebook, campaña …")
+    origin = str(c.get("SOURCE_DESCRIPTION") or "").strip()
+    return {"name": name, "phone": phone, "origin": origin}
 
 
 def _list_by_ids(method: str, ids: list[str], select: list[str]) -> list[dict]:
@@ -371,11 +373,11 @@ def _list_by_ids(method: str, ids: list[str], select: list[str]) -> list[dict]:
 
 
 def fetch_contacts(contact_ids: list[str]) -> dict[str, dict]:
-    """Trae {id: {name, phone}} de contactos."""
+    """Trae {id: {name, phone, origin}} de contactos."""
     rows = _list_by_ids(
         "crm.contact.list",
         contact_ids,
-        ["ID", "NAME", "SECOND_NAME", "LAST_NAME", "PHONE", "EMAIL"],
+        ["ID", "NAME", "SECOND_NAME", "LAST_NAME", "PHONE", "EMAIL", "SOURCE_DESCRIPTION"],
     )
     return {str(c.get("ID")): _parse_contact(c) for c in rows}
 
@@ -400,6 +402,7 @@ DEAL_COLUMNS_OUT = [
     "Telefono",
     "Fuente",
     "Motivo de baja",
+    "Origen",
     "_phone_sig",
 ]
 
@@ -496,6 +499,7 @@ def deals_to_dataframe(deals: list[dict], year_month: str | None = None) -> pd.D
             "Compania": companias,
             "Fuente": fuentes,
             "Motivo de baja": motivos,
+            "Origen": [contacts.get(c, {}).get("origin", "") for c in contact_ids],
         }
     )
 

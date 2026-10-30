@@ -65,6 +65,7 @@ _DEALS = pd.DataFrame(
             "+54 9 341 686-8753",
             "WhatsApp",
             "",
+            "Anuncio de Instagram, campaña tornos CNC",
         ),
         (
             "2",
@@ -74,6 +75,7 @@ _DEALS = pd.DataFrame(
             "Pedro",
             "+54 9 11 4567-8902",
             "Sitio Web",
+            "",
             "",
         ),
         (
@@ -85,6 +87,7 @@ _DEALS = pd.DataFrame(
             "+54 9 261 456-7890",
             "RRSS",
             "Precio alto",
+            "Anuncio de Facebook, campaña plegadoras",
         ),
         (
             "4",
@@ -95,6 +98,7 @@ _DEALS = pd.DataFrame(
             "+54 9 351 111-2222",
             "Correo",
             "",
+            "Anuncio de Instagram, campaña cortadora láser",
         ),
     ],
     columns=[
@@ -106,6 +110,7 @@ _DEALS = pd.DataFrame(
         "Telefono",
         "Fuente",
         "Motivo de baja",
+        "Origen",
     ],
 )
 

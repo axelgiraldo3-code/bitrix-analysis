@@ -7,12 +7,13 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from utils import charts, data, geo, kpis, periods, trends, ui
+from utils import campaigns, charts, data, geo, kpis, periods, trends, ui
 from utils.branding import (
     BITRIX_STAGE_COLORS,
     BITRIX_STAGE_ORDER,
     COTEAR_BLUE,
     COTEAR_GRAY,
+    NETWORK_COLORS,
     canonical_motivo,
     canonical_source,
     motivo_color,
@@ -26,6 +27,8 @@ TYPE_BAR = ":material/align_horizontal_left:"
 MODE_TOTAL = "Total"
 MODE_COUNT = "Cantidad"
 MODE_PCT = "Porcentaje"
+MODE_NETWORK = "Por red"
+MODE_STAGE = "Por etapa"
 TYPE_LINE = ":material/show_chart:"
 TYPE_COLS = ":material/bar_chart:"
 TYPE_STACKED = ":material/stacked_bar_chart:"
@@ -472,6 +475,10 @@ def _canonicalize(df: pd.DataFrame | None) -> pd.DataFrame | None:
     df["Fuente"] = src.map(canonical_source)
     if "Motivo de baja" in df:
         df["Motivo de baja"] = df["Motivo de baja"].map(canonical_motivo)
+    origin = df["Origen"] if "Origen" in df else pd.Series("", index=df.index)
+    df["Origen"] = origin.fillna("").astype(str)
+    df["Red"] = df["Origen"].map(campaigns.ad_network)
+    df["Campaña"] = campaigns.unify_spelling(df["Origen"].map(campaigns.campaign_name))
     return df
 
 
@@ -549,6 +556,97 @@ def _fuentes_card(b: pd.DataFrame, label: str) -> None:
             )
 
     ui.chart_card("fuentes", "Por fuente", chart, table, controls=controls)
+
+
+@st.fragment
+def _campanas_card(b: pd.DataFrame, label: str) -> None:
+    """Negocios de clientes que llegaron por un anuncio, por campaña ("Información
+    de origen" del contacto), de mayor a menor."""
+    ads = b[b["Campaña"] != ""]
+    counts = ads["Campaña"].value_counts()
+    names = counts.index.tolist()
+    values = [int(v) for v in counts.values]
+    total = sum(values) or 1
+
+    def breakdown(col: str, order: list[str]) -> pd.DataFrame:
+        pivot = ads.groupby(["Campaña", col]).size().unstack(fill_value=0)
+        pivot = pivot.reindex(index=names, fill_value=0)
+        return pivot[
+            [c for c in order if c in pivot.columns] + [c for c in pivot.columns if c not in order]
+        ]
+
+    by_stage = breakdown("Etapa", BITRIX_STAGE_ORDER)
+    by_network = breakdown("Red", list(NETWORK_COLORS))
+
+    def mode() -> str:
+        return st.session_state.get("campanas_mode", MODE_TOTAL)
+
+    def controls():
+        st.segmented_control(
+            "Mostrar",
+            [MODE_TOTAL, MODE_NETWORK, MODE_STAGE],
+            default=MODE_TOTAL,
+            required=True,
+            key="campanas_mode",
+            label_visibility="collapsed",
+            persist_state="session",
+            help="Total: negocios por campaña. Por red: Facebook o Instagram. "
+            "Por etapa: etapa actual de los negocios.",
+        )
+
+    def pivot_for_mode() -> tuple[pd.DataFrame, dict[str, str]]:
+        if mode() == MODE_NETWORK:
+            return by_network, NETWORK_COLORS
+        return by_stage, BITRIX_STAGE_COLORS
+
+    def chart():
+        if not names:
+            st.info(
+                "No hay negocios de clientes que llegaron por anuncios en el período. "
+                "Si el período se cargó antes de sumar las campañas, usá "
+                '"Recargar período desde API".'
+                if (b["Origen"] == "").all()
+                else "No hay negocios de clientes que llegaron por anuncios en el período."
+            )
+            return
+        if mode() == MODE_TOTAL:
+            opt = charts.hbar(
+                names, values, COTEAR_BLUE, f"negocios_por_campana_{label}", label_width=170
+            )
+        else:
+            pivot, colors = pivot_for_mode()
+            series = [(c, pivot[c].tolist(), colors.get(c, "#BDC3C7")) for c in pivot.columns]
+            opt = charts.stacked_bars(
+                names,
+                series,
+                f"campanas_{'red' if mode() == MODE_NETWORK else 'etapa'}_{label}",
+                y_name="Negocios",
+                width=900,
+                label_width=170,
+                horizontal=True,
+            )
+        ui.echart(opt, height=BOTTOM_H)
+
+    def table():
+        if mode() == MODE_TOTAL:
+            st.dataframe(
+                pd.DataFrame(
+                    {
+                        "Campaña": names,
+                        "Cantidad": values,
+                        "%": [round(v / total * 100, 1) for v in values],
+                    }
+                ),
+                hide_index=True,
+                width="stretch",
+                column_config={"%": st.column_config.NumberColumn(format="%.1f %%")},
+            )
+            return
+        t = pivot_for_mode()[0].copy()
+        t["Total"] = t.sum(axis=1)
+        st.dataframe(t.reset_index(), hide_index=True, width="stretch")
+
+    ui.chart_card("campanas", "Por campaña", chart, table, controls=controls)
 
 
 # ---------------------------------------------------------------------------
@@ -669,6 +767,7 @@ def render() -> None:
             toggle=True,
             height=BOTTOM_H,
         )
+    _campanas_card(b, label)
 
     listing_cols = [
         "Fecha movimiento",
@@ -680,6 +779,7 @@ def render() -> None:
         "Etapa",
         "Etapa anterior",
         "Fuente",
+        "Campaña",
         "Motivo de baja",
         "Telefono",
         "Zona",
