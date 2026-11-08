@@ -84,8 +84,9 @@ página abierta.
 
 ### Diseño
 
-- Gráficos con ECharts nativo (`st.echarts_chart`): tooltip al pasar el mouse,
-  sin controles de zoom y un ícono para descargar en PNG. El mapa de
+- Gráficos con ECharts nativo (`st.echarts_chart`, dibujados en SVG): tooltip
+  al pasar el mouse, sin controles de zoom y un ícono para descargar en SVG
+  (vectorial). El mapa de
   provincias usa Plotly sin barra de herramientas (ECharts nativo no admite
   contornos propios).
 - Tarjetas blancas con borde suave y esquinas de 8 px, sin sombra ni acentos

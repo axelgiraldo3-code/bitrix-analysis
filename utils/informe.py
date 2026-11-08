@@ -1,9 +1,10 @@
 """Informe mensual descargable: una nota Markdown (estilo Obsidian) con las
 tablas armadas y los enlaces a los gráficos, para revisar y completar a mano.
 
-Los gráficos no se generan acá: la nota enlaza ``img/<nombre>.png`` con el
-nombre que la app le pone a cada gráfico al descargarlo (ícono de descarga
-de cada tarjeta), así alcanza con guardarlos en ``img/`` junto a la nota.
+Los gráficos no se generan acá: la nota enlaza ``img/<nombre>.svg`` (a 500 px
+de ancho) con el nombre que la app le pone a cada gráfico al descargarlo
+(ícono de descarga de cada tarjeta), así alcanza con guardarlos en ``img/``
+junto a la nota.
 
 Sigue la plantilla del reporte de actividad (el primero fue septiembre
 2026). Los números salen de:
@@ -44,6 +45,8 @@ DERIVADAS = ["DERIVADO A BITRIX", "DERIVADO A TÉCNICA", "DERIVADO A RRHH", "VEN
 SIN_INTERES_REAL = ["SIN RESPUESTAS", "SIN INTERES"]
 NO_MOTIVO = "Sin motivo cargado"
 REVISAR = "> [!todo] Revisar\n> "
+# Ancho de los gráficos en la nota (px), igual para todos en Obsidian y el PDF
+IMG_WIDTH = 500
 
 
 # ---------------------------------------------------------------------------
@@ -226,25 +229,26 @@ def md_table(
 
 
 def chart_names(year_month: str) -> dict[str, str]:
-    """Nombre del PNG que descarga la app para cada gráfico del informe
+    """Nombre del SVG que descarga la app para cada gráfico del informe
     (mismos nombres que usan las páginas: ``clasificaciones_2026-10``,
     ``negocios_por_fuente_01-10-26_a_31-10-26``, ...)."""
     label = periods.range_label(*periods.month_bounds(year_month))
     return {
-        "clasificacion": f"clasificaciones_{year_month}.png",
-        "embudo": f"embudo_{year_month}.png",
-        "fuentes": f"negocios_por_fuente_{label}.png",
-        "provincias": f"provincias_negocios_{label}.png",
-        "motivos": f"motivos_baja_{label}.png",
-        "fuentes_etapa": f"fuentes_etapa_{label}.png",
-        "maquinas": f"demanda_productos_{label}.png",
+        "clasificacion": f"clasificaciones_{year_month}.svg",
+        "embudo": f"embudo_{year_month}.svg",
+        "fuentes": f"negocios_por_fuente_{label}.svg",
+        "provincias": f"provincias_negocios_{label}.svg",
+        "motivos": f"motivos_baja_{label}.svg",
+        "fuentes_etapa": f"fuentes_etapa_{label}.svg",
+        "maquinas": f"demanda_productos_{label}.svg",
     }
 
 
 def _img(name: str, alt: str, where: str) -> list[str]:
-    """Enlace a la imagen y, como comentario de Obsidian (no se ve al leer
-    ni al exportar), de qué tarjeta de la app descargarla."""
-    return [f"![{alt}](img/{name})", f"%% Descargar de: {where} %%"]
+    """Enlace a la imagen a 500 px de ancho ("|500", Obsidian) y, como
+    comentario de Obsidian (no se ve al leer ni al exportar), de qué tarjeta
+    de la app descargarla."""
+    return [f"![{alt}|{IMG_WIDTH}](img/{name})", f"%% Descargar de: {where} %%"]
 
 
 def _list_es(items: list[str]) -> str:

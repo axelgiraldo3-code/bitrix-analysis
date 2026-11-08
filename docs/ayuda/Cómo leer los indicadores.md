@@ -37,7 +37,7 @@ En la esquina superior derecha de cada tarjeta hay dos controles:
 - Los íconos de gráfico y de tabla alternan entre el gráfico y una tabla con sus valores exactos.
 - En algunas tarjetas, otro selector cambia la forma de presentar los mismos datos, por ejemplo barras o torta.
 
-Al pasar el cursor sobre una barra, una porción o una celda se ve su detalle. El ícono de descarga de cada gráfico lo guarda como imagen, útil para armar informes. Los mapas no tienen esta opción.
+Al pasar el cursor sobre una barra, una porción o una celda se ve su detalle. El ícono de descarga de cada gráfico lo guarda como imagen SVG, que se mantiene nítida a cualquier tamaño y en el PDF del informe. Los mapas no tienen esta opción.
 
 Los porcentajes de las tortas se redondean por separado, por lo que a veces suman 99,9 % o 100,1 %.
 
