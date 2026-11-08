@@ -73,7 +73,7 @@ página abierta.
   cuenta los negocios **creados** dentro del período (con su etapa actual). Los
   KPIs se comparan con el período anterior de igual duración (mes, trimestre o
   año anterior; en un rango, los mismos días justo antes). Tipo de máquina ×
-  etapa (cantidad ⇄ %), motivos de baja (torta ⇄ barras), fuentes (sólidas ⇄
+  etapa (total ⇄ etapas), motivos de baja (torta ⇄ barras), fuentes (sólidas ⇄
   apiladas por etapa), mapa + ranking de provincias, campañas de anuncios
   (total ⇄ por red ⇄ por etapa) y lista de negocios (columna Tipo maquinaria oculta).
 - **Clasificación manual**: selección de un reporte y guardado en cola; el
@@ -84,9 +84,9 @@ página abierta.
 
 ### Diseño
 
-- Gráficos con ECharts nativo (`st.echarts_chart`, dibujados en SVG): tooltip
-  al pasar el mouse, sin controles de zoom y un ícono para descargar en SVG
-  (vectorial). El mapa de
+- Gráficos con ECharts nativo (`st.echarts_chart`, dibujados en SVG): etiquetas
+  en porcentaje, tooltip con la cantidad al pasar el mouse, sin controles de
+  zoom y un ícono para descargar en SVG (vectorial). El mapa de
   provincias usa Plotly sin barra de herramientas (ECharts nativo no admite
   contornos propios).
 - Tarjetas blancas con borde suave y esquinas de 8 px, sin sombra ni acentos

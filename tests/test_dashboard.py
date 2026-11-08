@@ -135,14 +135,14 @@ def test_labels_readable_on_their_color():
 def test_stacked_bars_hide_zero_labels():
     opt = charts.stacked_bars(["x", "y"], [("A", [2, 0], "#01498E")], "f")
     data = opt["series"][0]["data"]
-    assert "label" not in data[0] and data[1]["label"] == {"show": False}
+    assert data[0]["label"] == {"formatter": "100,0 %"} and data[1]["label"] == {"show": False}
 
 
 def test_stacked_bars_no_white_border_and_hide_thin_labels():
     opt = charts.stacked_bars(["x"], [("A", [60], "#01498E"), ("B", [1], "#B10202")], "f")
     assert all("borderColor" not in s["itemStyle"] for s in opt["series"])
     assert opt["series"][1]["data"][0]["label"] == {"show": False}  # 1 de 61: muy fino
-    assert "label" not in opt["series"][0]["data"][0]
+    assert opt["series"][0]["data"][0]["label"] == {"formatter": "98,4 %"}
 
 
 def test_hbar_orders_largest_on_top():

@@ -1,7 +1,8 @@
 """Opciones de Apache ECharts para ``st.echarts_chart`` (funciones puras).
 
-Todos los gráficos comparten: tooltip al pasar el mouse, sin controles de
-zoom, y un único ícono para descargar la imagen en SVG.
+Todos los gráficos comparten: tooltip al pasar el mouse (con la cantidad),
+etiquetas en porcentaje, sin controles de zoom, y un único ícono para
+descargar la imagen en SVG.
 """
 
 from __future__ import annotations
@@ -178,17 +179,14 @@ def legend_rows(names: Sequence[str], width: int, max_label: int = 0) -> int:
     return rows
 
 
-def _value_axis(name: str = "", percent: bool = False) -> dict:
-    axis = {
+def _value_axis(name: str = "") -> dict:
+    return {
         "type": "value",
         "name": name,
         "nameTextStyle": {"color": MUTED},
         "axisLabel": {"color": MUTED},
         "splitLine": {"lineStyle": {"color": GRID}},
     }
-    if percent:
-        axis.update(max=100, axisLabel={"color": MUTED, "formatter": "{value} %"})
-    return axis
 
 
 # ---------------------------------------------------------------------------
@@ -262,13 +260,26 @@ def hbar(
     unit: str = "",
     label_width: int = 150,
 ) -> dict:
-    """Barras horizontales ordenadas de mayor (arriba) a menor."""
+    """Barras horizontales ordenadas de mayor (arriba) a menor. Etiqueta: %
+    sobre el total; tooltip: cantidad y %."""
     if isinstance(colors, str):
         colors = [colors] * len(names)
     rows = list(zip(names, values, colors))[::-1]  # ECharts dibuja de abajo hacia arriba
+    total = float(sum(values)) or 1.0
+    data = []
+    for n, v, c in rows:
+        pct = pct_label(float(v) / total * 100)
+        data.append(
+            {
+                "value": float(v),
+                "itemStyle": {"color": c},
+                "label": {"formatter": pct},
+                "tooltip": {"formatter": f"{html.escape(str(n))}<br/>{_num(v)}{unit} ({pct})"},
+            }
+        )
     return {
         **_base(filename),
-        "tooltip": {"trigger": "item", "confine": True, "formatter": "{b}<br/>{c}" + unit},
+        "tooltip": {"trigger": "item", "confine": True},
         "grid": {"left": 8, "right": 48, "top": 28, "bottom": 8, "containLabel": True},
         "xAxis": {**_value_axis(), "show": False},
         "yAxis": {
@@ -284,8 +295,8 @@ def hbar(
                 "type": "bar",
                 "barMaxWidth": 22,
                 "itemStyle": {"borderRadius": [0, 4, 4, 0]},
-                "label": {"show": True, "position": "right", "color": TEXT, "formatter": "{c}"},
-                "data": [{"value": float(v), "itemStyle": {"color": c}} for _, v, c in rows],
+                "label": {"show": True, "position": "right", "color": TEXT},
+                "data": data,
             }
         ],
     }
@@ -297,7 +308,6 @@ def stacked_bars(
     filename: str,
     *,
     y_name: str = "",
-    percent: bool = False,
     rotate: int = 0,
     width: int = 720,
     label_width: int = 110,
@@ -305,35 +315,34 @@ def stacked_bars(
 ) -> dict:
     """Columnas apiladas. ``series`` = [(nombre, valores, color), ...].
     ``horizontal``: barras horizontales con la primera categoría arriba.
-    Los segmentos en 0 no muestran etiqueta. En porcentaje, etiquetas y
-    tooltip van armados por segmento ("33,3 %"): las plantillas de ECharts
+    La altura es la cantidad y la etiqueta, el %: con una sola serie, sobre
+    el total del gráfico; con varias, sobre el total de su columna (cada
+    columna suma 100 %). Los segmentos en 0 no muestran etiqueta. Etiquetas
+    y tooltip van armados por segmento ("33,3 %"): las plantillas de ECharts
     no admiten coma decimal."""
+    col_totals = [sum(float(vals[i]) for _, vals, _ in series) for i in range(len(categories))]
+    grand_total = sum(col_totals)
     # Altura de la columna más alta: los segmentos muy finos (< 4 % de esa
     # altura) no muestran etiqueta porque no entra; el valor sigue en el tooltip.
-    stack_max = (
-        max(
-            (sum(float(vals[i]) for _, vals, _ in series) for i in range(len(categories))),
-            default=0,
-        )
-        or 1
-    )
-    min_label = stack_max * 0.04
+    min_label = (max(col_totals, default=0) or 1) * 0.04
     out_series = []
     for name, values, color in series:
         txt = label_color(color)
         data = []
-        for cat, v in zip(categories, values):
+        for cat, v, col_total in zip(categories, values, col_totals):
             v = round(float(v), 1)
-            item: dict = {"value": v}
+            base = grand_total if len(series) == 1 else col_total
+            pct = pct_label(v / base * 100) if base else "—"
+            item: dict = {
+                "value": v,
+                "label": {"formatter": pct},
+                "tooltip": {
+                    "formatter": f"{html.escape(str(cat))}<br/>"
+                    f"{html.escape(str(name))}: {_num(v)} ({pct})"
+                },
+            }
             if v == 0 or v < min_label:
                 item["label"] = {"show": False}
-            elif percent:
-                item["label"] = {"formatter": pct_label(v)}
-            if percent:
-                item["tooltip"] = {
-                    "formatter": f"{html.escape(str(cat))}<br/>"
-                    f"{html.escape(str(name))}: {pct_label(v)}"
-                }
             data.append(item)
         out_series.append(
             {
@@ -342,16 +351,11 @@ def stacked_bars(
                 "stack": "total",
                 "barMaxWidth": 56,
                 "itemStyle": {"color": color},
-                "label": {"show": True, "color": txt, "fontSize": 11, "formatter": "{c}"},
+                "label": {"show": True, "color": txt, "fontSize": 11},
                 "emphasis": {"focus": "series"},
                 "data": data,
             }
         )
-    tooltip = (
-        {"trigger": "item", "confine": True}
-        if percent
-        else {"trigger": "axis", "confine": True, "axisPointer": {"type": "shadow"}}
-    )
     cat_axis = {
         "type": "category",
         "data": [str(c) for c in categories],
@@ -366,14 +370,14 @@ def stacked_bars(
         },
         "tooltip": {"show": True},
     }
-    value_axis = _value_axis(y_name, percent)
+    value_axis = _value_axis(y_name)
     if horizontal:
         cat_axis.update(inverse=True, axisLine={"show": False})
         for serie in out_series:
             serie["barMaxWidth"] = 22
     return {
         **_base(filename),
-        "tooltip": tooltip,
+        "tooltip": {"trigger": "item", "confine": True},
         "legend": _legend(type="plain", bottom=0, left="center"),
         "grid": {
             "left": 8,
@@ -489,6 +493,7 @@ def leader_bars(
             data.append(
                 {
                     "value": float(v),
+                    "label": {"formatter": pct},
                     "tooltip": {
                         "formatter": (
                             f"{html.escape(str(cat))} · {html.escape(name)}<br/>"
@@ -504,13 +509,7 @@ def leader_bars(
                 "stack": "lider",
                 "barMaxWidth": 40,
                 "itemStyle": {"color": colors.get(name, COTEAR_GRAY), "borderRadius": [4, 4, 0, 0]},
-                "label": {
-                    "show": True,
-                    "position": "top",
-                    "color": TEXT,
-                    "fontSize": 11,
-                    "formatter": "{c}",
-                },
+                "label": {"show": True, "position": "top", "color": TEXT, "fontSize": 11},
                 "data": data,
             }
         )

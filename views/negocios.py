@@ -25,8 +25,7 @@ from views.common import zones_card
 TYPE_PIE = ":material/donut_large:"
 TYPE_BAR = ":material/align_horizontal_left:"
 MODE_TOTAL = "Total"
-MODE_COUNT = "Cantidad"
-MODE_PCT = "Porcentaje"
+MODE_STAGES = "Etapas"
 MODE_NETWORK = "Por red"
 MODE_STAGE = "Por etapa"
 TYPE_LINE = ":material/show_chart:"
@@ -342,19 +341,19 @@ def _maquina_card(b: pd.DataFrame, label: str) -> None:
     chart_pivot = trends.top_with_others(pivot, TOP_MACHINES)
 
     def mode() -> str:
-        return st.session_state.get("bitrix_bar_mode", MODE_COUNT)
+        return st.session_state.get("maquina_modo", MODE_STAGES)
 
     def controls():
         st.segmented_control(
             "Mostrar",
-            [MODE_TOTAL, MODE_COUNT, MODE_PCT],
-            default=MODE_COUNT,
+            [MODE_TOTAL, MODE_STAGES],
+            default=MODE_STAGES,
             required=True,
-            key="bitrix_bar_mode",
+            key="maquina_modo",
             label_visibility="collapsed",
             persist_state="session",
-            help="Total: barras sólidas por tipo de máquina. Cantidad y "
-            "Porcentaje: segmentadas por etapa.",
+            help="Total: barras sólidas por tipo de máquina. Etapas: segmentadas por "
+            "etapa actual, con el % dentro de cada tipo.",
         )
 
     def chart():
@@ -373,10 +372,8 @@ def _maquina_card(b: pd.DataFrame, label: str) -> None:
             opt["grid"]["bottom"] = 8
             ui.echart(opt, height=CHART_H)
             return
-        pct = mode() == MODE_PCT
-        values = chart_pivot.div(chart_pivot.sum(axis=1), axis=0) * 100 if pct else chart_pivot
         series = [
-            (e, values[e].tolist(), BITRIX_STAGE_COLORS.get(e, "#BDC3C7"))
+            (e, chart_pivot[e].tolist(), BITRIX_STAGE_COLORS.get(e, "#BDC3C7"))
             for e in chart_pivot.columns
         ]
         ui.echart(
@@ -384,8 +381,7 @@ def _maquina_card(b: pd.DataFrame, label: str) -> None:
                 chart_pivot.index.tolist(),
                 series,
                 f"actividad_{label}",
-                y_name="% dentro del tipo" if pct else "Negocios",
-                percent=pct,
+                y_name="Negocios",
                 rotate=90,
                 width=600,
                 label_width=130,
