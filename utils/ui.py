@@ -349,7 +349,15 @@ def echart(
             "Actualizá con `pip install -U streamlit` (mínimo 1.66)."
         )
         return
-    _call(st.echarts_chart, option, height=height, key=key, alt=alt)
+    # SVG: vectorial en pantalla y en la descarga (``charts._toolbox``)
+    _call(
+        st.echarts_chart,
+        charts.svg_safe_fonts(option),
+        height=height,
+        key=key,
+        alt=alt,
+        renderer="svg",
+    )
 
 
 PLOTLY_STATIC = {"displayModeBar": False, "scrollZoom": False, "displaylogo": False}

@@ -108,13 +108,13 @@ def test_markdown_links_app_chart_names(bot, deals):
     assert md.startswith("# REPORTE DE ACTIVIDAD COMERCIAL - SEPTIEMBRE 2026")
     links = re.findall(r"!\[[^\]]*\]\(img/([^)]+)\)", md)
     assert links == [
-        "clasificaciones_2026-09.png",
-        "embudo_2026-09.png",
-        "negocios_por_fuente_01-09-26_a_30-09-26.png",
-        "provincias_negocios_01-09-26_a_30-09-26.png",
-        "motivos_baja_01-09-26_a_30-09-26.png",
-        "fuentes_etapa_01-09-26_a_30-09-26.png",
-        "demanda_productos_01-09-26_a_30-09-26.png",
+        "clasificaciones_2026-09.svg",
+        "embudo_2026-09.svg",
+        "negocios_por_fuente_01-09-26_a_30-09-26.svg",
+        "provincias_negocios_01-09-26_a_30-09-26.svg",
+        "motivos_baja_01-09-26_a_30-09-26.svg",
+        "fuentes_etapa_01-09-26_a_30-09-26.svg",
+        "demanda_productos_01-09-26_a_30-09-26.svg",
     ]
     assert md.count("%% Descargar de:") == len(links)
     assert "A la fecha de corte, hay **3 negocios" in md
@@ -144,7 +144,7 @@ def test_class_table_fixed_order():
 def test_build_without_deals(bot):
     md = informe.build(bot, pd.DataFrame(), "2026-09")
     assert "Sin negocios de Bitrix" in md
-    assert re.findall(r"\(img/([^)]+)\)", md) == ["clasificaciones_2026-09.png"]
+    assert re.findall(r"\(img/([^)]+)\)", md) == ["clasificaciones_2026-09.svg"]
 
 
 def test_funnel_table():

@@ -87,7 +87,7 @@ def test_category_kpi_excludes_non_provinces():
 
 
 # --- gráficos -------------------------------------------------------------------
-def test_charts_are_json_and_have_png_export():
+def test_charts_are_json_and_have_svg_export():
     opts = [
         charts.donut(["A", "B"], [1, 2], ["#01498E", "#ffe5a0"], "f"),
         charts.hbar(["A", "B"], [3, 1], "#01498E", "f"),
@@ -96,7 +96,32 @@ def test_charts_are_json_and_have_png_export():
     for opt in opts:
         json.dumps(opt)  # st.echarts_chart sólo acepta opciones JSON
         assert opt["toolbox"]["feature"]["saveAsImage"]["name"] == "f"
+        assert opt["toolbox"]["feature"]["saveAsImage"]["type"] == "svg"
         assert "dataZoom" not in opt
+
+
+def test_svg_safe_fonts_without_quotes():
+    opts = [
+        charts.stacked_bars(["x", "y"], [("A", [1, 2], "#01498E")], "f", y_name="N"),
+        charts.heatmap(["0h"], ["Lun"], [(0, 0, 1)], "f"),
+        charts.funnel(["A", "B"], [3, 1], ["#01498E", "#11734B"], "f"),
+        charts.donut(["A", "B"], [1, 2], ["#01498E", "#11734B"], "f"),
+    ]
+    for opt in opts:
+        safe = charts.svg_safe_fonts(opt)
+        assert '"' not in charts.FONT
+        assert safe["textStyle"]["fontFamily"] == charts.FONT
+        assert safe["textStyle"]["color"] == opt["textStyle"]["color"]  # conserva el resto
+        for key in ("xAxis", "yAxis"):
+            if key in safe:
+                assert safe[key]["axisLabel"]["fontFamily"] == charts.FONT
+                assert safe[key]["nameTextStyle"]["fontFamily"] == charts.FONT
+        for key in ("legend", "visualMap"):
+            if key in safe:
+                assert safe[key]["textStyle"]["fontFamily"] == charts.FONT
+        json.dumps(safe)
+    assert charts.svg_safe_fonts(opts[2])["series"][0]["label"]["fontFamily"] == charts.FONT
+    assert "fontFamily" not in opts[0]["xAxis"]["axisLabel"]  # no modifica el original
 
 
 def test_labels_readable_on_their_color():

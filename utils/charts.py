@@ -1,7 +1,7 @@
 """Opciones de Apache ECharts para ``st.echarts_chart`` (funciones puras).
 
 Todos los gráficos comparten: tooltip al pasar el mouse, sin controles de
-zoom, y un único ícono para descargar la imagen en PNG.
+zoom, y un único ícono para descargar la imagen en SVG.
 """
 
 from __future__ import annotations
@@ -15,6 +15,10 @@ TEXT = "#2B2F33"
 MUTED = "#6B7785"
 GRID = "#EEF1F4"
 DARK_LABEL = "#1A1D21"
+# Misma fuente que el tema de Streamlit, sin comillas: el tema usa
+# '"Source Sans", sans-serif' y ECharts la copia sin escapar dentro de
+# style="…" al exportar, lo que deja el SVG mal formado.
+FONT = "Source Sans, sans-serif"
 
 # Suavizado de las líneas (0 = recta, 1 = máximo). Con valores chicos y
 # enteros un suavizado alto dibuja curvas por debajo de los datos.
@@ -95,14 +99,50 @@ def _toolbox(filename: str) -> dict:
         "iconStyle": {"borderColor": "#9AA4AD"},
         "emphasis": {"iconStyle": {"borderColor": COTEAR_BLUE}},
         "feature": {
+            # SVG: el gráfico se dibuja con renderer="svg" (``ui.echart``)
             "saveAsImage": {
-                "title": "Descargar PNG",
+                "type": "svg",
+                "title": "Descargar SVG",
                 "name": filename,
-                "pixelRatio": 2,
                 "backgroundColor": "#FFFFFF",
             }
         },
     }
+
+
+def svg_safe_fonts(option: dict) -> dict:
+    """Copia de ``option`` con ``FONT`` en cada texto al que el tema de
+    Streamlit le pone su fuente entre comillas (general, leyenda, ejes,
+    escala del mapa de calor y etiquetas del embudo). El tooltip no hace
+    falta: es HTML y no se exporta."""
+
+    def with_font(style: dict | None) -> dict:
+        return {**(style or {}), "fontFamily": FONT}
+
+    out = dict(option)
+    out["textStyle"] = with_font(out.get("textStyle"))
+    for key in ("legend", "visualMap"):
+        if isinstance(out.get(key), dict):
+            out[key] = {**out[key], "textStyle": with_font(out[key].get("textStyle"))}
+    for key in ("xAxis", "yAxis"):
+        axes = out.get(key)
+        if axes is None:
+            continue
+        fixed = [
+            {
+                **ax,
+                "axisLabel": with_font(ax.get("axisLabel")),
+                "nameTextStyle": with_font(ax.get("nameTextStyle")),
+            }
+            for ax in (axes if isinstance(axes, list) else [axes])
+        ]
+        out[key] = fixed if isinstance(axes, list) else fixed[0]
+    if "series" in out:
+        out["series"] = [
+            {**s, "label": with_font(s.get("label"))} if s.get("type") == "funnel" else s
+            for s in out["series"]
+        ]
+    return out
 
 
 def _base(filename: str) -> dict:
