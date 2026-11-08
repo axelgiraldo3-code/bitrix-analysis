@@ -50,7 +50,7 @@ Para cada mes, la fuente que generó más negocios, con su color. Al pasar el cu
 
 Una columna por tipo de máquina, dividida según la etapa actual de sus negocios. Se muestran los {{tipos_maquina}} tipos con más negocios y el resto se agrupa en "Otros"; la tabla los incluye a todos. Cómo se determina el tipo: [[Tipos de máquina]].
 
-Con la opción Porcentaje, cada columna suma 100 %. Así se puede comparar qué proporción de cada tipo avanzó o se perdió, aunque las cantidades sean muy distintas.
+Con la opción Etapas, el alto de cada tramo es la cantidad de negocios y su etiqueta, el porcentaje dentro de ese tipo (cada columna suma 100 %). Así se puede comparar qué proporción de cada tipo avanzó o se perdió, aunque las cantidades sean muy distintas.
 
 La opción Total muestra sólo la cantidad de negocios de cada tipo, sin dividir por etapa. Es el gráfico de demanda de productos del informe mensual.
 

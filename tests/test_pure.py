@@ -350,16 +350,48 @@ def test_fmt_dec_uses_decimal_comma():
     assert charts.pct_label(52.5) == "52,5 %"
 
 
-def test_stacked_bars_percent_labels_with_comma():
+def test_stacked_bars_percent_within_each_column():
     from utils import charts
 
     opt = charts.stacked_bars(
-        ["Torno"], [("A", [33.33], "#01498E"), ("B", [66.67], "#11734B")], "x", percent=True
+        ["Torno", "Fresa"],
+        [("A", [1, 3], "#01498E"), ("B", [2, 1], "#11734B")],
+        "x",
     )
-    item = opt["series"][0]["data"][0]
-    assert item["label"]["formatter"] == "33,3 %"
-    assert item["tooltip"]["formatter"] == "Torno<br/>A: 33,3 %"
+    a, b = (s["data"] for s in opt["series"])
+    assert a[0]["value"] == 1.0  # la altura sigue siendo la cantidad
+    assert [a[0]["label"]["formatter"], b[0]["label"]["formatter"]] == ["33,3 %", "66,7 %"]
+    assert [a[1]["label"]["formatter"], b[1]["label"]["formatter"]] == ["75,0 %", "25,0 %"]
+    assert a[0]["tooltip"]["formatter"] == "Torno<br/>A: 1 (33,3 %)"
     assert opt["tooltip"]["trigger"] == "item"
+
+
+def test_stacked_bars_single_series_percent_of_total():
+    from utils import charts
+
+    opt = charts.stacked_bars(
+        ["Máquinas", "Repuestos", "Servicio Técnico", "No identificado"],
+        [("Derivación interna", [19, 4, 3, 1], "#01498E")],
+        "x",
+    )
+    labels = [d["label"]["formatter"] for d in opt["series"][0]["data"]]
+    assert labels == ["70,4 %", "14,8 %", "11,1 %", "3,7 %"]
+
+
+def test_stacked_bars_zero_without_label():
+    from utils import charts
+
+    opt = charts.stacked_bars(["x", "y"], [("A", [1, 0], "#01498E")], "f")
+    assert opt["series"][0]["data"][1]["label"] == {"show": False}
+
+
+def test_hbar_percent_labels_and_count_tooltip():
+    from utils import charts
+
+    opt = charts.hbar(["A", "B"], [3, 1], "#01498E", "f")
+    data = opt["series"][0]["data"]  # de abajo hacia arriba
+    assert [d["label"]["formatter"] for d in data] == ["25,0 %", "75,0 %"]
+    assert data[1]["tooltip"]["formatter"] == "A<br/>3 (75,0 %)"
 
 
 def test_heatmap_zero_cells_blank_and_tooltips():
@@ -527,6 +559,7 @@ def test_leader_bars():
     assert wa["data"][0] == "-" and wa["data"][2] == "-"
     assert wa["data"][3]["value"] == 4.0
     assert "4 de 8 (50,0 %)" in wa["data"][3]["tooltip"]["formatter"]
+    assert wa["data"][3]["label"]["formatter"] == "50,0 %"
 
 
 def test_weekday_counts():
