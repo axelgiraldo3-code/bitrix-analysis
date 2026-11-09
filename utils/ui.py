@@ -177,6 +177,17 @@ def inject_css() -> None:
         opacity: 1 !important; cursor: text;
       }}
 
+      /* Descarga de gráficos (``echart``): el componente no ocupa lugar y su
+         ícono se ubica arriba a la derecha del gráfico */
+      div[data-testid="stElementContainer"]:has(.ct-export) {{ display: none !important; }}
+      .ct-export-btn {{
+        position: absolute; top: 0; right: 0; z-index: 2;
+        width: 24px; height: 24px; padding: 4px; border: 0; border-radius: 4px;
+        background: transparent; color: #9AA4AD; cursor: pointer; line-height: 0;
+      }}
+      .ct-export-btn:hover {{ color: var(--ct-blue); background: #F4F6F9; }}
+      .ct-export-btn:disabled {{ cursor: progress; opacity: .5; }}
+
       /* Barra lateral */
       section[data-testid="stSidebar"] h3 {{ font-size: .8rem; letter-spacing: .06em;
         text-transform: uppercase; color: var(--ct-muted); }}
@@ -340,6 +351,75 @@ def raw_data(
 # ---------------------------------------------------------------------------
 # Gráficos
 # ---------------------------------------------------------------------------
+# Descarga a tamaño fijo: el ``saveAsImage`` de ECharts exporta el tamaño que
+# tiene el gráfico en pantalla (depende de la ventana y del zoom). Este
+# componente agrega su propio ícono al gráfico y, al hacer clic, lo vuelve a
+# dibujar fuera de pantalla a ``charts.EXPORT_SIZE`` con la misma opción
+# (ECharts del CDN, render del lado del navegador) y descarga el SVG.
+_EXPORT_JS = """
+const SRC = "https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.esm.min.mjs";
+const ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" '
+  + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+  + 'stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/>'
+  + '<path d="M5 20h14"/></svg>';
+let lib;
+
+async function toSvg(option, [w, h]) {
+  lib = lib || (await import(SRC));
+  const chart = lib.init(null, null, { renderer: "svg", ssr: true, width: w, height: h });
+  chart.setOption({ ...option, animation: false, toolbox: { show: false },
+                    backgroundColor: "#FFFFFF" });
+  const svg = chart.renderToSVGString();
+  chart.dispose();
+  return svg;
+}
+
+export default function ({ data, parentElement }) {
+  const host = parentElement.closest('[data-testid="stElementContainer"]');
+  const box = host && host.previousElementSibling;
+  if (!box) return;
+  box.style.position = "relative";
+  let btn = box.querySelector(":scope > .ct-export-btn");
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ct-export-btn";
+    btn.innerHTML = ICON;
+    box.appendChild(btn);
+  }
+  const [w, h] = data.size;
+  btn.title = `Descargar SVG (${w} × ${h})`;
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      const svg = await toSvg(data.option, data.size);
+      const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${data.filename}.svg`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.error("Descarga del gráfico", err);
+      btn.title = "No se pudo descargar (¿sin conexión al CDN de ECharts?)";
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
+"""
+
+try:
+    _chart_export = st.components.v2.component(
+        "chart_export",
+        html='<span class="ct-export"></span>',
+        js=_EXPORT_JS,
+        isolate_styles=False,
+    )
+except AttributeError:  # Streamlit sin componentes v2: queda sin descarga
+    _chart_export = None
+
+
 def echart(
     option: dict, *, height: int = 360, key: str | None = None, alt: str | None = None
 ) -> None:
@@ -349,15 +429,14 @@ def echart(
             "Actualizá con `pip install -U streamlit` (mínimo 1.66)."
         )
         return
-    # SVG: vectorial en pantalla y en la descarga (``charts._toolbox``)
-    _call(
-        st.echarts_chart,
-        charts.svg_safe_fonts(option),
-        height=height,
-        key=key,
-        alt=alt,
-        renderer="svg",
-    )
+    safe = charts.svg_safe_fonts(option)
+    _call(st.echarts_chart, safe, height=height, key=key, alt=alt, renderer="svg")
+    name = charts.export_name(option)
+    if name and _chart_export is not None:
+        _chart_export(
+            data={"option": safe, "filename": name, "size": list(charts.EXPORT_SIZE)},
+            key=f"{key}_export" if key else None,
+        )
 
 
 PLOTLY_STATIC = {"displayModeBar": False, "scrollZoom": False, "displaylogo": False}
