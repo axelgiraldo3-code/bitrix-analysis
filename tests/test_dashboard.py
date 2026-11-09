@@ -95,9 +95,13 @@ def test_charts_are_json_and_have_svg_export():
     ]
     for opt in opts:
         json.dumps(opt)  # st.echarts_chart sólo acepta opciones JSON
-        assert opt["toolbox"]["feature"]["saveAsImage"]["name"] == "f"
-        assert opt["toolbox"]["feature"]["saveAsImage"]["type"] == "svg"
+        # El ícono de ECharts no se ve: descarga ``ui.echart`` a EXPORT_SIZE
+        assert opt["toolbox"]["show"] is False
+        assert charts.export_name(opt) == "f"
         assert "dataZoom" not in opt
+    assert charts.export_name(charts.sparkline(["a", "b"], [1, 2], "#01498E")) is None
+    w, h = charts.EXPORT_SIZE
+    assert w / h == 4 / 3
 
 
 def test_svg_safe_fonts_without_quotes():

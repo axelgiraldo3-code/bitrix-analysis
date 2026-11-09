@@ -86,7 +86,9 @@ página abierta.
 
 - Gráficos con ECharts nativo (`st.echarts_chart`, dibujados en SVG): etiquetas
   en porcentaje, tooltip con la cantidad al pasar el mouse, sin controles de
-  zoom y un ícono para descargar en SVG (vectorial). El mapa de
+  zoom y un ícono para descargar en SVG (vectorial) a 800 × 600 fijo, sin
+  importar la pantalla. Torta con leyenda a la derecha; nombres largos de
+  barras en 2 renglones; leyendas de barras en columnas parejas. El mapa de
   provincias usa Plotly sin barra de herramientas (ECharts nativo no admite
   contornos propios).
 - Tarjetas blancas con borde suave y esquinas de 8 px, sin sombra ni acentos

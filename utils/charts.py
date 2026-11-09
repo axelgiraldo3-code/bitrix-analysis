@@ -21,6 +21,14 @@ DARK_LABEL = "#1A1D21"
 # style="…" al exportar, lo que deja el SVG mal formado.
 FONT = "Source Sans, sans-serif"
 
+# Tamaño fijo de la imagen descargada (px, 4:3), igual en cualquier pantalla
+EXPORT_SIZE = (800, 600)
+
+# Ancho aproximado de un carácter a 12 px y medidas de las leyendas
+CHAR_W = 6.6
+LEGEND_GAP = 16
+LEGEND_TEXT_MAX = 200
+
 # Suavizado de las líneas (0 = recta, 1 = máximo). Con valores chicos y
 # enteros un suavizado alto dibuja curvas por debajo de los datos.
 SMOOTH = 0.35
@@ -93,22 +101,20 @@ def series_color(i: int) -> str:
 # Piezas comunes
 # ---------------------------------------------------------------------------
 def _toolbox(filename: str) -> dict:
-    return {
-        "right": 0,
-        "top": 0,
-        "itemSize": 14,
-        "iconStyle": {"borderColor": "#9AA4AD"},
-        "emphasis": {"iconStyle": {"borderColor": COTEAR_BLUE}},
-        "feature": {
-            # SVG: el gráfico se dibuja con renderer="svg" (``ui.echart``)
-            "saveAsImage": {
-                "type": "svg",
-                "title": "Descargar SVG",
-                "name": filename,
-                "backgroundColor": "#FFFFFF",
-            }
-        },
-    }
+    """Toolbox oculto: sólo lleva el nombre del archivo. La descarga la hace
+    ``ui.echart`` con su propio ícono, redibujando el gráfico a
+    ``EXPORT_SIZE`` (el ``saveAsImage`` de ECharts exporta el tamaño de
+    pantalla)."""
+    return {"show": False, "feature": {"saveAsImage": {"type": "svg", "name": filename}}}
+
+
+def export_name(option: dict) -> str | None:
+    """Nombre de descarga de un gráfico (``None`` si no se descarga, como
+    las mini líneas)."""
+    try:
+        return option["toolbox"]["feature"]["saveAsImage"]["name"]
+    except (KeyError, TypeError):
+        return None
 
 
 def svg_safe_fonts(option: dict) -> dict:
@@ -166,17 +172,57 @@ def _legend(**kw) -> dict:
     }
 
 
-def legend_rows(names: Sequence[str], width: int, max_label: int = 0) -> int:
-    """Filas que ocupa una leyenda horizontal en ``width`` px (estimado:
-    ~6.6 px por carácter a 12 px + ícono y separación)."""
-    rows, used = 1, 0
-    for n in names:
-        chars = min(len(str(n)), max_label // 7) if max_label else len(str(n))
-        item = 12 + 5 + 6.6 * chars + 12
-        if used and used + item > width:
-            rows, used = rows + 1, 0
-        used += item
-    return rows
+def _text_width(names: Sequence[str], max_width: int) -> int:
+    """Ancho del nombre más largo a 12 px (~6.6 px por carácter), con tope."""
+    longest = max((len(str(n)) for n in names), default=0)
+    return int(min(max_width, CHAR_W * longest + 2))
+
+
+def _bottom_legend(names: Sequence[str]) -> dict:
+    """Leyenda abajo en columnas parejas: todos los ítems miden lo mismo
+    (el nombre más largo, con tope), así quedan alineados y al bajar de fila
+    no se pisan. Los nombres que no entran se cortan con "…" (tooltip)."""
+    return _legend(
+        type="plain",
+        bottom=0,
+        left="center",
+        itemGap=LEGEND_GAP,
+        textStyle={
+            "color": TEXT,
+            "fontSize": 12,
+            "width": _text_width(names, LEGEND_TEXT_MAX),
+            "overflow": "truncate",
+        },
+        tooltip={"show": True},
+    )
+
+
+def legend_rows(names: Sequence[str], width: int) -> int:
+    """Filas que ocupa ``_bottom_legend`` en ``width`` px."""
+    if not names:
+        return 1
+    item = 12 + 5 + _text_width(names, LEGEND_TEXT_MAX) + LEGEND_GAP
+    per_row = max(1, int((width + LEGEND_GAP) // item))
+    return -(-len(names) // per_row)
+
+
+def wrap_label(text, max_chars: int) -> str:
+    """Etiqueta de eje en hasta 2 renglones: corta en el último espacio que
+    entra en ``max_chars`` (o a la fuerza si es una sola palabra) y, si el
+    segundo renglón tampoco entra, lo termina con "…"."""
+    s = str(text)
+    if max_chars <= 0 or len(s) <= max_chars:
+        return s
+    cut = s.rfind(" ", 0, max_chars + 1)
+    first, rest = (s[:cut], s[cut + 1 :]) if cut > 0 else (s[:max_chars], s[max_chars:])
+    rest = rest.strip()
+    if len(rest) > max_chars:
+        rest = rest[: max_chars - 1].rstrip() + "…"
+    return f"{first}\n{rest}"
+
+
+def _wrap_chars(label_width: int) -> int:
+    return max(4, int(label_width / CHAR_W))
 
 
 def _value_axis(name: str = "") -> dict:
@@ -202,10 +248,10 @@ def donut(
     height: int = 380,
     label_width: int = 150,
 ) -> dict:
-    """Torta con agujero: porcentaje dentro de cada porción y leyenda abajo
-    (las etiquetas largas se cortan; el texto completo aparece en el
-    tooltip). ``width``/``height`` aproximan el tamaño en px para ubicar la
-    leyenda sin que tape la torta."""
+    """Torta con agujero: porcentaje dentro de cada porción y leyenda vertical
+    a la derecha (los nombres largos bajan de renglón). ``width``/``height``
+    aproximan el tamaño en px de la tarjeta: con eso se calculan el centro y
+    el radio en %, así la torta escala igual en pantalla y en la descarga."""
     # El % se calcula acá con 1 decimal: valores iguales muestran el mismo %
     # (ECharts reparte el redondeo para sumar 100 y da 14.28 % / 14.29 %).
     total = float(sum(values)) or 1.0
@@ -221,25 +267,35 @@ def donut(
                 "tooltip": {"formatter": f"{html.escape(str(n))}<br/>{_num(v)} ({pct})"},
             }
         )
-    rows = legend_rows(names, width - 16, label_width)
-    legend_h = rows * 22 + 6
-    free_h = height - legend_h - 24
-    radius = max(60, min(width - 40, free_h) // 2)
+    # Espacio libre a la izquierda de la leyenda: ahí va la torta, centrada
+    text_w = _text_width(names, label_width)
+    legend_w = 12 + 5 + text_w + 8
+    free_w = max(120, width - legend_w - 8)
+    outer = max(50, min(free_w / 2, height / 2) - 14)  # px en la tarjeta
+    outer_pct = round(outer / (min(width, height) / 2) * 100)
     return {
         **_base(filename),
         "tooltip": {"trigger": "item", "confine": True},
         "legend": _legend(
-            type="plain",
-            bottom=0,
-            left="center",
-            textStyle={"color": TEXT, "fontSize": 12, "width": label_width, "overflow": "truncate"},
+            type="scroll",
+            orient="vertical",
+            right=8,
+            top="middle",
+            itemGap=10,
+            textStyle={
+                "color": TEXT,
+                "fontSize": 12,
+                "width": text_w,
+                "overflow": "break",
+                "lineHeight": 15,
+            },
             tooltip={"show": True},
         ),
         "series": [
             {
                 "type": "pie",
-                "radius": [int(radius * 0.39), radius],
-                "center": ["50%", 18 + free_h // 2],
+                "radius": [f"{round(outer_pct * 0.39)}%", f"{outer_pct}%"],
+                "center": [f"{round(free_w / 2 / width * 100)}%", "50%"],
                 "avoidLabelOverlap": True,
                 "itemStyle": {"borderColor": "#FFFFFF", "borderWidth": 1},
                 "label": {"show": True, "position": "inside", "fontSize": 11, "fontWeight": "bold"},
@@ -284,10 +340,10 @@ def hbar(
         "xAxis": {**_value_axis(), "show": False},
         "yAxis": {
             "type": "category",
-            "data": [str(n) for n, _, _ in rows],
+            "data": [wrap_label(n, _wrap_chars(label_width)) for n, _, _ in rows],
             "axisTick": {"show": False},
             "axisLine": {"show": False},
-            "axisLabel": {"color": TEXT, "width": label_width, "overflow": "truncate"},
+            "axisLabel": {"color": TEXT, "lineHeight": 14},
             "tooltip": {"show": True},
         },
         "series": [
@@ -358,16 +414,10 @@ def stacked_bars(
         )
     cat_axis = {
         "type": "category",
-        "data": [str(c) for c in categories],
+        "data": [wrap_label(c, _wrap_chars(label_width)) for c in categories],
         "axisTick": {"show": False},
         "axisLine": {"lineStyle": {"color": "#D5DBE1"}},
-        "axisLabel": {
-            "color": TEXT,
-            "rotate": rotate,
-            "interval": 0,
-            "width": label_width,
-            "overflow": "truncate",
-        },
+        "axisLabel": {"color": TEXT, "rotate": rotate, "interval": 0, "lineHeight": 14},
         "tooltip": {"show": True},
     }
     value_axis = _value_axis(y_name)
@@ -378,7 +428,7 @@ def stacked_bars(
     return {
         **_base(filename),
         "tooltip": {"trigger": "item", "confine": True},
-        "legend": _legend(type="plain", bottom=0, left="center"),
+        "legend": _bottom_legend([n for n, _, _ in series]),
         "grid": {
             "left": 8,
             "right": 16,
@@ -446,7 +496,7 @@ def timeseries(
             "confine": True,
             "axisPointer": {"type": "shadow" if kind == "bar" else "line"},
         },
-        "legend": _legend(type="plain", bottom=0, left="center"),
+        "legend": _bottom_legend([s[0] for s in series]),
         "grid": {
             "left": 8,
             "right": 16,
@@ -516,7 +566,7 @@ def leader_bars(
     return {
         **_base(filename),
         "tooltip": {"trigger": "item", "confine": True},
-        "legend": _legend(type="plain", bottom=0, left="center"),
+        "legend": _bottom_legend(names),
         "grid": {
             "left": 8,
             "right": 16,

@@ -333,6 +333,61 @@ def test_donut_equal_values_same_percent():
     json.dumps(opt)
 
 
+def test_donut_legend_right_and_percent_layout():
+    from utils import charts
+
+    opt = charts.donut(
+        ["DERIVADO A BITRIX", "NECESIDAD INCOMPATIBLE"],
+        [3, 1],
+        ["#11734B", "#E67E22"],
+        "x",
+        width=480,
+        height=400,
+        label_width=170,
+    )
+    legend, serie = opt["legend"], opt["series"][0]
+    assert legend["orient"] == "vertical" and legend["right"] == 8
+    assert legend["textStyle"]["overflow"] == "break"
+    # En %: la torta escala igual en la tarjeta y en la descarga
+    assert all(str(r).endswith("%") for r in serie["radius"])
+    cx = int(serie["center"][0].rstrip("%"))
+    assert 25 <= cx < 50  # a la izquierda, libre de la leyenda
+
+
+def test_wrap_label_two_lines():
+    from utils import charts
+
+    assert charts.wrap_label("Torno CNC", 20) == "Torno CNC"
+    assert charts.wrap_label("Cotizado aguardando devolución", 20) == (
+        "Cotizado aguardando\ndevolución"
+    )
+    # Segundo renglón demasiado largo: termina en "…"
+    assert charts.wrap_label("Derivación de otra area muy larga", 12) == "Derivación\nde otra are…"
+    # Una sola palabra larga: corte a la fuerza
+    assert charts.wrap_label("Electroerosionadora", 10) == "Electroero\nsionadora"
+
+
+def test_hbar_wraps_long_names():
+    from utils import charts
+
+    opt = charts.hbar(["Derivación de otra area"], [1], "#01498E", "x", label_width=100)
+    assert opt["yAxis"]["data"] == ["Derivación de\notra area"]
+    assert "Derivación de otra area<br/>" in opt["series"][0]["data"][0]["tooltip"]["formatter"]
+
+
+def test_bottom_legend_equal_columns():
+    from utils import charts
+
+    stages = ["Pendiente de cotizar", "Cotizado aguardando devolución", "En negociación"]
+    opt = charts.stacked_bars(["x"], [(s, [1], "#01498E") for s in stages], "f", width=600)
+    style = opt["legend"]["textStyle"]
+    assert style["width"] == int(charts.CHAR_W * len(stages[1]) + 2)  # el más largo
+    assert style["overflow"] == "truncate"
+    assert charts.legend_rows(stages, 1000) == 1
+    assert charts.legend_rows(stages, 450) == 2  # 2 por fila
+    assert charts.legend_rows(stages, 100) == 3  # nunca 0 por fila
+
+
 def test_funnel_keeps_order_and_percent_of_first():
     from utils import charts
 
