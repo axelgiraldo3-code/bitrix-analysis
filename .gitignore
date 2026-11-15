@@ -30,6 +30,8 @@ data/first_deal.json
 data/stages_map.json
 data/deal_*.json
 data/userfields*.json
+# Fuente del ENACOM (pública, local): se versiona sólo localidades_ar.json
+data/*.xlsx
 
 # Instrucciones locales para Claude Code
 CLAUDE.md

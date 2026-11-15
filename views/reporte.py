@@ -311,7 +311,13 @@ def render() -> None:
 
     ui.section("Origen de las consultas")
     zones_card(
-        "zonas_consultas", "Por provincia", df["Zona"], "consultas", f"provincias_consultas_{month}"
+        "zonas_consultas",
+        "Por provincia",
+        df["Zona"],
+        "consultas",
+        f"provincias_consultas_{month}",
+        # Una caché previa al cambio puede no traer la columna (dura hasta 10 min)
+        localities=df["Localidad"] if "Localidad" in df else None,
     )
 
     ui.section("Cuándo llegan las consultas")
@@ -326,10 +332,12 @@ def render() -> None:
         "Nombre",
         "Numero",
         "Zona",
+        "Localidad",
         "Area de interes",
         "Negocio",
         "Clasificacion interna",
     ]
+    cols = [c for c in cols if c in df.columns]
     ui.raw_data(
         "consultas",
         f"Datos crudos del mes ({ui.plural(len(df), 'consultas')})",

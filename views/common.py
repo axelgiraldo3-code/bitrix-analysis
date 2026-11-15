@@ -27,6 +27,12 @@ def month_filter(months: list[str]) -> str:
 
 TYPE_MAP = ":material/map:"
 TYPE_BAR = ":material/align_horizontal_left:"
+PCT_COLUMN = {"%": st.column_config.NumberColumn(format="%.1f %%")}
+CLICK_HINT = "Hacé clic en una provincia para ver sus localidades."
+LOCALITY_NOTE = (
+    "Localidad según el código de área (numeración geográfica del ENACOM): es la "
+    "cabecera del área, puede no ser la ciudad exacta; % sobre el total de la provincia."
+)
 
 
 def zones_card(
@@ -36,6 +42,7 @@ def zones_card(
     unit: str,
     filename: str,
     *,
+    localities: pd.Series | None = None,
     toggle: bool = False,
     subtitle: str = "",
     height: int = 420,
@@ -43,64 +50,212 @@ def zones_card(
     """Mapa de provincias + ranking, con la tabla de zonas detrás.
 
     Con ``toggle=True`` (tarjeta de media columna) muestra el mapa por
-    defecto y un selector mapa ⇄ barras en lugar de ambos lado a lado."""
+    defecto y un selector mapa ⇄ barras en lugar de ambos lado a lado.
+
+    Con ``localities`` (alineada con ``zones``) el mapa es clicable: al
+    elegir una provincia, el mapa, el ranking y la tabla pasan a sus
+    localidades, con un botón para volver a todas las provincias."""
     if toggle:
-        _zones_toggle_card(key, title, zones, unit, filename, subtitle, height)
-        return
-    total = int(len(zones))
-    counts = geo.zone_counts(zones, threshold=0)
-    note = geo.outside_map_note(counts, total, unit=unit)
-
-    def chart():
-        c_map, c_rank = st.columns([7, 5], vertical_alignment="center")
-        with c_map:
-            fig = geo.province_map(counts, total, unit=unit, height=420)
-            if fig.data:
-                ui.plotly_map(fig, key=f"map_{key}")
-            else:
-                st.info(f"Ninguna {unit[:-1]} pudo ubicarse en una provincia.")
-        with c_rank:
-            top = counts.head(10)
-            colors = [
-                COTEAR_GRAY if z in geo.NON_PROVINCE_ZONES else COTEAR_BLUE for z in top["Zona"]
-            ]
-            ui.echart(
-                charts.hbar(top["Zona"].tolist(), top["Cantidad"].tolist(), colors, filename),
-                height=max(220, 34 * len(top) + 40),
-            )
-        st.caption(
-            "Provincia según el código de área del teléfono; el % es sobre el total."
-            + (f" Fuera del mapa: {note}." if note else "")
-        )
-
-    def data():
-        st.dataframe(
-            counts,
-            hide_index=True,
-            width="stretch",
-            column_config={"%": st.column_config.NumberColumn(format="%.1f %%")},
-        )
-
-    ui.chart_card(key, title, chart, data)
+        _zones_toggle_card(key, title, zones, localities, unit, filename, subtitle, height)
+    else:
+        _zones_full_card(key, title, zones, localities, unit, filename, subtitle, height)
 
 
-def _zone_bars(counts: pd.DataFrame, filename: str, height: int | None = None) -> None:
-    top = counts.head(10)
-    colors = [COTEAR_GRAY if z in geo.NON_PROVINCE_ZONES else COTEAR_BLUE for z in top["Zona"]]
-    ui.echart(
-        charts.hbar(top["Zona"].tolist(), top["Cantidad"].tolist(), colors, filename),
-        height=height or max(220, 34 * len(top) + 40),
+# ---------------------------------------------------------------------------
+# Provincia elegida (clic en el mapa)
+# ---------------------------------------------------------------------------
+def _prov_key(key: str) -> str:
+    return f"prov_{key}"
+
+
+def _map_key(key: str) -> str:
+    """Key del mapa de provincias. Cambia al volver, para que el widget nuevo
+    no arrastre la selección anterior y vuelva a abrir el detalle."""
+    return f"map_{key}_{st.session_state.get(f'_mapn_{key}', 0)}"
+
+
+def _back_to_provinces(key: str) -> None:
+    st.session_state.pop(_prov_key(key), None)
+    st.session_state[f"_mapn_{key}"] = st.session_state.get(f"_mapn_{key}", 0) + 1
+
+
+def clicked_province(state, locations: list[str]) -> str | None:
+    """Provincia del clic según el estado de selección del mapa: el nombre va
+    en ``customdata[0]``; si falta, se toma ``point_index`` sobre
+    ``locations`` (el orden de las provincias del coroplético)."""
+    try:
+        points = state["selection"]["points"]
+    except (KeyError, TypeError):
+        return None
+    for p in points or []:
+        if p.get("curve_number", 0) != 0:  # sólo el coroplético (las etiquetas no)
+            continue
+        cd = p.get("customdata")
+        if isinstance(cd, (list, tuple)) and cd and cd[0] in locations:
+            return str(cd[0])
+        if p.get("location") in locations:
+            return str(p["location"])
+        idx = p.get("point_index", p.get("point_number"))
+        if isinstance(idx, int) and 0 <= idx < len(locations):
+            return locations[idx]
+    return None
+
+
+def _selected_province(
+    key: str, counts: pd.DataFrame, fig, localities: pd.Series | None
+) -> str | None:
+    """Provincia en detalle: un clic nuevo en el mapa (estado del widget, que
+    se lee antes de dibujarlo) o la ya elegida, si sigue teniendo datos."""
+    if localities is None:
+        return None
+    pkey = _prov_key(key)
+    locations = list(fig.data[0].locations) if fig.data else []
+    clicked = clicked_province(st.session_state.get(_map_key(key)), locations)
+    if clicked:
+        st.session_state[pkey] = clicked
+        st.session_state[f"_mapn_{key}"] = st.session_state.get(f"_mapn_{key}", 0) + 1
+    prov = st.session_state.get(pkey)
+    if prov and prov not in set(counts["Zona"]):
+        st.session_state.pop(pkey, None)
+        return None
+    return prov
+
+
+def _province_header(key: str, prov: str, n: int, unit: str) -> None:
+    c1, c2 = st.columns([3, 2], vertical_alignment="center")
+    c1.markdown(f"**{prov}** · {ui.plural(n, unit)}")
+    c2.button(
+        "Todas las provincias",
+        key=f"allprov_{key}",
+        type="tertiary",
+        on_click=_back_to_provinces,
+        args=(key,),
+        width="stretch",
     )
 
 
+def _slug(text: str) -> str:
+    return "_".join(text.split())
+
+
+# ---------------------------------------------------------------------------
+# Piezas de la tarjeta
+# ---------------------------------------------------------------------------
+def _rank_bars(
+    names: list[str], values: list[int], filename: str, height: int | None = None
+) -> None:
+    """Ranking (top 10) en barras; lo que no es un lugar (Extranjero, Sin
+    verificar, Sin identificar, Otros) va en gris."""
+    names, values = names[:10], values[:10]
+    colors = [COTEAR_GRAY if z in geo.NON_PROVINCE_ZONES else COTEAR_BLUE for z in names]
+    ui.echart(
+        charts.hbar(names, values, colors, filename),
+        height=height or max(220, 34 * len(names) + 40),
+    )
+
+
+def _province_map(key: str, fig, unit: str, clickable: bool) -> None:
+    if fig.data:
+        ui.plotly_map(fig, key=_map_key(key), on_select=clickable)
+    else:
+        st.info(f"Ninguna {unit[:-1]} pudo ubicarse en una provincia.")
+
+
+def _locality_map(key: str, lcounts: pd.DataFrame, prov: str, unit: str, height: int) -> None:
+    fig = geo.locality_map(lcounts, prov, unit=unit, height=height)
+    if fig.data:
+        ui.plotly_map(fig, key=f"locmap_{key}")
+    else:
+        st.info(f"Ninguna {unit[:-1]} de {prov} pudo ubicarse en una localidad.")
+
+
+def _locality_caption(lcounts: pd.DataFrame, prov: str, unit: str) -> None:
+    note = geo.outside_locality_note(lcounts, prov, unit=unit)
+    st.caption(LOCALITY_NOTE + (f" Fuera del mapa: {note}." if note else ""))
+
+
+def _table(df: pd.DataFrame) -> None:
+    st.dataframe(df, hide_index=True, width="stretch", column_config=PCT_COLUMN)
+
+
+# ---------------------------------------------------------------------------
+# Tarjetas
+# ---------------------------------------------------------------------------
 @st.fragment
-def _zones_toggle_card(
-    key: str, title: str, zones: pd.Series, unit: str, filename: str, subtitle: str, height: int
+def _zones_full_card(
+    key: str,
+    title: str,
+    zones: pd.Series,
+    localities: pd.Series | None,
+    unit: str,
+    filename: str,
+    subtitle: str,
+    height: int,
 ) -> None:
     total = int(len(zones))
     counts = geo.zone_counts(zones, threshold=0)
     note = geo.outside_map_note(counts, total, unit=unit)
+    fig = geo.province_map(counts, total, unit=unit, height=height)
+    prov = _selected_province(key, counts, fig, localities)
+    lcounts = geo.locality_counts(zones, localities, prov) if prov else None
+
+    def chart():
+        if prov:
+            _province_header(key, prov, int(lcounts["Cantidad"].sum()), unit)
+        c_map, c_rank = st.columns([7, 5], vertical_alignment="center")
+        with c_map:
+            if prov:
+                _locality_map(key, lcounts, prov, unit, height)
+            else:
+                _province_map(key, fig, unit, clickable=localities is not None)
+        with c_rank:
+            if prov:
+                _rank_bars(
+                    lcounts["Localidad"].tolist(),
+                    lcounts["Cantidad"].tolist(),
+                    f"{filename}_{_slug(prov)}",
+                )
+            else:
+                _rank_bars(counts["Zona"].tolist(), counts["Cantidad"].tolist(), filename)
+        if prov:
+            _locality_caption(lcounts, prov, unit)
+        else:
+            st.caption(
+                "Provincia según el código de área del teléfono; el % es sobre el total."
+                + (f" Fuera del mapa: {note}." if note else "")
+                + (f" {CLICK_HINT}" if localities is not None and fig.data else "")
+            )
+
+    def data():
+        if prov:
+            st.caption(f"Localidades de {prov}")
+            _table(lcounts)
+        else:
+            _table(counts)
+
+    ui.chart_card(key, title, chart, data, subtitle=subtitle)
+
+
+@st.fragment
+def _zones_toggle_card(
+    key: str,
+    title: str,
+    zones: pd.Series,
+    localities: pd.Series | None,
+    unit: str,
+    filename: str,
+    subtitle: str,
+    height: int,
+) -> None:
+    total = int(len(zones))
+    counts = geo.zone_counts(zones, threshold=0)
+    note = geo.outside_map_note(counts, total, unit=unit)
+    fig = geo.province_map(counts, total, unit=unit, height=height)
     type_key = f"tipo_{key}"
+    bars = st.session_state.get(type_key, TYPE_MAP) == TYPE_BAR
+    # El mapa sólo existe en modo mapa: en barras no hay clic que leer
+    prov = _selected_province(key, counts, fig, localities)
+    lcounts = geo.locality_counts(zones, localities, prov) if prov else None
 
     def controls():
         st.segmented_control(
@@ -115,25 +270,38 @@ def _zones_toggle_card(
         )
 
     def chart():
-        if st.session_state.get(type_key, TYPE_MAP) == TYPE_BAR:
-            _zone_bars(counts, filename, height)
-        else:
-            fig = geo.province_map(counts, total, unit=unit, height=height)
-            if fig.data:
-                ui.plotly_map(fig, key=f"map_{key}")
+        if prov:
+            n = int(lcounts["Cantidad"].sum())
+            _province_header(key, prov, n, unit)
+            # El encabezado ocupa un renglón: el gráfico se achica para que la
+            # tarjeta mantenga el alto de su vecina
+            h = height - 44
+            if bars:
+                _rank_bars(
+                    lcounts["Localidad"].tolist(),
+                    lcounts["Cantidad"].tolist(),
+                    f"{filename}_{_slug(prov)}",
+                    h,
+                )
             else:
-                st.info(f"Ninguna {unit[:-1]} pudo ubicarse en una provincia.")
+                _locality_map(key, lcounts, prov, unit, h)
+            _locality_caption(lcounts, prov, unit)
+            return
+        if bars:
+            _rank_bars(counts["Zona"].tolist(), counts["Cantidad"].tolist(), filename, height)
+        else:
+            _province_map(key, fig, unit, clickable=localities is not None)
         st.caption(
             "Según el código de área del teléfono; % sobre el total."
             + (f" Fuera del mapa: {note}." if note else "")
+            + (f" {CLICK_HINT}" if localities is not None and fig.data and not bars else "")
         )
 
     def data():
-        st.dataframe(
-            counts,
-            hide_index=True,
-            width="stretch",
-            column_config={"%": st.column_config.NumberColumn(format="%.1f %%")},
-        )
+        if prov:
+            st.caption(f"Localidades de {prov}")
+            _table(lcounts)
+        else:
+            _table(counts)
 
     ui.chart_card(key, title, chart, data, controls=controls, subtitle=subtitle)

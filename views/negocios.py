@@ -760,6 +760,7 @@ def render() -> None:
             b["Zona"],
             "negocios",
             f"provincias_negocios_{label}",
+            localities=b["Localidad"],
             toggle=True,
             height=BOTTOM_H,
         )
@@ -779,6 +780,7 @@ def render() -> None:
         "Motivo de baja",
         "Telefono",
         "Zona",
+        "Localidad",
     ]
     listing = b[[c for c in listing_cols if c in b.columns]]
     ui.raw_data(

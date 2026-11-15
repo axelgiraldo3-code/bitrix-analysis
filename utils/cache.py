@@ -7,7 +7,14 @@ from datetime import datetime
 
 import pandas as pd
 
-from .phone_ar import format_ar, is_foreign, only_digits, province_of, significant_ar
+from .phone_ar import (
+    format_ar,
+    is_foreign,
+    locality_of,
+    only_digits,
+    province_of,
+    significant_ar,
+)
 
 DERIVADO_BITRIX = "DERIVADO A BITRIX"
 DERIVADO_TECNICA = "DERIVADO A TÉCNICA"
@@ -65,7 +72,8 @@ def clean_source(raw: pd.DataFrame) -> pd.DataFrame:
 
     Salida (columnas):
         Fecha, Numero, Nombre, Area de interes, Resumen general,
-        Clasificacion interna, Tipo de contacto, Zona, _dt (datetime), _phone_sig
+        Clasificacion interna, Tipo de contacto, Zona, Localidad, _dt (datetime),
+        _phone_sig
     """
     if raw.empty:
         return pd.DataFrame(
@@ -78,6 +86,7 @@ def clean_source(raw: pd.DataFrame) -> pd.DataFrame:
                 "Clasificacion interna",
                 "Tipo de contacto",
                 "Zona",
+                "Localidad",
                 "_dt",
                 "_phone_sig",
             ]
@@ -113,6 +122,7 @@ def clean_source(raw: pd.DataFrame) -> pd.DataFrame:
             "Clasificacion interna": "",
             "Tipo de contacto": tipo,
             "Zona": digits.map(province_of),
+            "Localidad": digits.map(locality_of),
             "_dt": dt,
             "_phone_sig": phone_sig,
         }

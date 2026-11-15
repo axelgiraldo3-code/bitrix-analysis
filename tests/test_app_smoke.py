@@ -204,3 +204,22 @@ def test_page_runs(fake_io, url_path):
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert not [w.value for w in at.warning if "prueba de humo" in w.value]
+
+
+@pytest.mark.parametrize(
+    "url_path, key", [("reporte", "zonas_consultas"), ("negocios", "zonas_negocios")]
+)
+def test_province_detail(fake_io, url_path, key):
+    """Con una provincia elegida (clic en el mapa) la tarjeta pasa a sus
+    localidades, y "Todas las provincias" vuelve al mapa nacional."""
+    at = AppTest.from_file("../app.py", default_timeout=30)
+    at.run()
+    at._page_hash = calc_hash(url_path)
+    at.session_state[f"prov_{key}"] = "Santa Fe"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("Santa Fe" in m.value for m in at.markdown)
+    back = at.button(key=f"allprov_{key}")
+    back.click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert f"prov_{key}" not in at.session_state
