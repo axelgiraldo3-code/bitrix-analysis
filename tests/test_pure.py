@@ -7,7 +7,16 @@ import pytest
 
 from utils import cache, geo
 from utils.machinery import classify_machinery
-from utils.phone_ar import format_ar, is_foreign, province_of, significant_ar
+from utils.phone_ar import (
+    area_code_of,
+    format_ar,
+    is_foreign,
+    load_localities,
+    locality_of,
+    province_of,
+    significant_ar,
+)
+from views.common import clicked_province
 
 
 # --- phone_ar ----------------------------------------------------------------
@@ -38,10 +47,39 @@ def test_significant_ar_compares_last_10_digits():
         ("5492974170867", "Chubut"),
         ("5934987654321", "Extranjero"),
         ("", "Sin identificar"),
+        ("5492362123456", "Buenos Aires"),  # código sólo en la tabla de provincias
+        ("5499991234567", "Sin verificar"),  # argentino, código inexistente
     ],
 )
 def test_province_of(raw, prov):
     assert province_of(raw) == prov
+
+
+@pytest.mark.parametrize(
+    "raw, code, loc",
+    [
+        ("5493416868753", "341", "Rosario"),
+        ("+54 9 11 5589-1098", "11", "AMBA"),
+        ("3516868753", "351", "Córdoba"),
+        ("5492964123456", "2964", "Río Grande"),
+        ("5492362123456", "2362", "Sin verificar"),  # no figura en el ENACOM
+        ("5499991234567", "", "Sin verificar"),
+        ("5934987654321", "", "Extranjero"),
+        ("", "", "Sin identificar"),
+    ],
+)
+def test_locality_of(raw, code, loc):
+    assert area_code_of(raw) == code
+    assert locality_of(raw) == loc
+
+
+def test_localities_table_complete():
+    locs = load_localities()
+    assert len(locs) == 300
+    assert all({"localidad", "provincia", "lat", "lon"} <= set(e) for e in locs.values())
+    # Mismas provincias que el mapa
+    provinces = {f["id"] for f in geo.load_provinces()["features"]}
+    assert {e["provincia"] for e in locs.values()} <= provinces
 
 
 def test_is_foreign():
@@ -252,6 +290,42 @@ def test_province_map_only_active_provinces():
     assert sorted(choro.locations) == ["Buenos Aires", "Córdoba"]
     assert sorted(labels.text) == ["30,0 %", "50,0 %"]
     assert "Extranjero: 2 consultas (20,0 %)" in geo.outside_map_note(counts, len(zones))
+    # El nombre de la provincia viaja en customdata para identificar el clic
+    assert [cd[0] for cd in choro.customdata] == list(choro.locations)
+
+
+def test_clicked_province():
+    locations = ["Buenos Aires", "Córdoba"]
+    by_name = {"selection": {"points": [{"curve_number": 0, "customdata": ["Córdoba", "30 %"]}]}}
+    by_index = {"selection": {"points": [{"curve_number": 0, "point_index": 0}]}}
+    label = {"selection": {"points": [{"curve_number": 1, "point_index": 0}]}}
+    assert clicked_province(by_name, locations) == "Córdoba"
+    assert clicked_province(by_index, locations) == "Buenos Aires"
+    assert clicked_province(label, locations) is None
+    assert clicked_province(None, locations) is None
+    assert clicked_province({"selection": {"points": []}}, locations) is None
+
+
+def test_locality_counts_within_province():
+    zones = pd.Series(["Santa Fe"] * 4 + ["Córdoba"] * 2 + ["Santa Fe"])
+    locs = pd.Series(["Rosario"] * 3 + ["Rafaela"] + ["Córdoba"] * 2 + ["Sin verificar"])
+    t = geo.locality_counts(zones, locs, "Santa Fe")
+    assert t["Localidad"].tolist() == ["Rosario", "Rafaela", "Sin verificar"]
+    assert t["Cantidad"].tolist() == [3, 1, 1]
+    assert t["%"].tolist() == [60.0, 20.0, 20.0]  # sobre el total de la provincia
+    assert geo.locality_counts(zones, locs, "Salta").empty
+
+
+def test_locality_map_bubbles_only_located():
+    t = pd.DataFrame({"Localidad": ["Rosario", "Rafaela", "Sin verificar"], "Cantidad": [3, 1, 1]})
+    fig = geo.locality_map(t, "Santa Fe")
+    base, bubbles = fig.data
+    assert list(base.locations) == ["Santa Fe"]
+    assert [cd[0] for cd in bubbles.customdata] == ["Rosario", "Rafaela"]
+    assert list(bubbles.text) == ["60,0 %", "20,0 %"]
+    assert fig.layout.geo.fitbounds == "locations"
+    assert "Sin verificar" in geo.outside_locality_note(t, "Santa Fe")
+    assert not geo.locality_map(t, "Provincia inexistente").data
 
 
 def test_geojson_has_all_provinces():

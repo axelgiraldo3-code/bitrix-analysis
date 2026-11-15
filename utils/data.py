@@ -15,7 +15,7 @@ import streamlit as st
 
 from . import bitrix, cache, pending, periods, sheets
 from .machinery import classify_machinery
-from .phone_ar import province_of, significant_ar
+from .phone_ar import locality_of, province_of, significant_ar
 
 # Vigencia del snapshot de Bitrix de cada mes: el mes en curso y el anterior
 # todavía tienen negocios que se mueven; los más viejos casi no cambian (y
@@ -435,6 +435,7 @@ def deals_created_between(
     in_created = (b["_cre_dt"] >= pd.Timestamp(start)) & (b["_cre_dt"] <= pd.Timestamp(end))
     b = b[in_created].sort_values("_mov_dt", ascending=False).copy()
     b["Zona"] = b["Telefono"].map(province_of)
+    b["Localidad"] = b["Telefono"].map(locality_of)
     if "Etapa anterior" not in b.columns:
         b["Etapa anterior"] = ""
     return b, sources, warns

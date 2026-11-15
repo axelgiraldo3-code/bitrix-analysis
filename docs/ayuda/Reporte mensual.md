@@ -29,7 +29,9 @@ Al comparar ambas vistas se ve, por ejemplo, cuántas de las consultas que el as
 
 ### Por provincia
 
-El mapa colorea cada provincia según su porcentaje de consultas: cuanto más oscuro, más consultas. Sólo se muestran las provincias que tuvieron alguna. A la derecha, el ranking incluye también, en gris, las consultas del extranjero y las no identificadas, que no se pueden ubicar en el mapa.
+El mapa colorea cada provincia según su porcentaje de consultas: cuanto más oscuro, más consultas. Sólo se muestran las provincias que tuvieron alguna. A la derecha, el ranking incluye también, en gris, las consultas del extranjero, las sin verificar y las no identificadas, que no se pueden ubicar en el mapa.
+
+Al hacer clic en una provincia se ve su distribución por localidad: el mapa se acerca a la provincia y muestra un círculo por localidad (más grande y más oscuro, más consultas), con el porcentaje dentro de la provincia. El ranking y la tabla también pasan a localidades. El botón "Todas las provincias" vuelve al mapa completo.
 
 ## Cuándo llegan las consultas
 
@@ -45,4 +47,4 @@ Este gráfico ayuda a definir horarios de publicidad y de atención, y a ver cu�
 
 ## Datos del mes
 
-La tabla desplegable al final lista cada consulta con su fecha, nombre, número, provincia, área de interés, negocio asociado en Bitrix24 (si existe) y clasificación.
+La tabla desplegable al final lista cada consulta con su fecha, nombre, número, provincia, localidad, área de interés, negocio asociado en Bitrix24 (si existe) y clasificación.

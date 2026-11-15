@@ -68,7 +68,7 @@ El selector cambia a barras segmentadas: cada fuente se divide según la etapa e
 
 ### Por provincia
 
-Mapa con el porcentaje de negocios por provincia. El selector de la tarjeta permite verlo en barras.
+Mapa con el porcentaje de negocios por provincia. El selector de la tarjeta permite verlo en barras. Al hacer clic en una provincia, el mapa, las barras y la tabla muestran sus localidades; "Todas las provincias" vuelve atrás.
 
 ### Por campaña
 

@@ -4,7 +4,7 @@
 | Área de interés       | Área a la que el asistente de WhatsApp derivó la conversación: Máquinas, Repuestos o Servicio Técnico. |
 | Clasificación interna | Calidad real de la consulta, asignada automáticamente o a mano. Ver [[Origen de los datos]].           |
 | Sin interés real      | Consultas SIN RESPUESTAS más SIN INTERES.                                                              |
-| Característica        | Código de área del teléfono; se usa para deducir la provincia.                                         |
+| Característica        | Código de área del teléfono; se usa para deducir provincia y localidad.                                 |
 | Pipeline              | Embudo de ventas de Bitrix24. La aplicación usa el de venta de máquinas.                               |
 | Negocio del período   | Negocio de venta de máquinas creado dentro del período elegido.                                        |
 | En curso              | Negocio que todavía no está en Cerrado Ganado ni en Cerrado Perdido.                                   |

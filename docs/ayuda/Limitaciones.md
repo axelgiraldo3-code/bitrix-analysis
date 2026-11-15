@@ -2,6 +2,7 @@
 
 - Los indicadores de calidad dependen de la clasificación. El porcentaje sin interés real sólo es confiable cuando el mes está clasificado; las consultas SIN CLASIFICAR no se cuentan como sin interés.
 - La provincia se deduce de la característica del teléfono, no de la ubicación de la persona. Un celular de otra provincia se cuenta en la provincia de su característica. La Ciudad de Buenos Aires y el Gran Buenos Aires se cuentan juntos.
+- La localidad es la cabecera de la característica (por ejemplo, Rosario para la 341), no la ciudad exacta: los pueblos cercanos que comparten característica se cuentan en la cabecera.
 - El área de interés es la que interpretó el asistente, que no siempre coincide con la necesidad real.
 - Las consultas se agrupan por mes calendario: una persona que escribe el 30 y el 2 cuenta en ambos meses.
 - La hora de cada consulta es la del final de la conversación.

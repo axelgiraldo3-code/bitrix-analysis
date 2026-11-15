@@ -42,8 +42,8 @@ utils/
   kpis.py                   Variación de KPIs contra el período anterior
   sheets.py                 gspread I/O (fuente, pestañas mensuales, índice de teléfonos)
   bitrix.py                 Cliente REST Bitrix24 (batch, rate limit) + normalización de deals
-  phone_ar.py               Formato '+54 9 <area> <local>' y provincia por código de área
-  geo.py                    Conteo por provincia con agrupación en "Otros"
+  phone_ar.py               Formato '+54 9 <area> <local>', provincia y localidad (ENACOM) por código de área
+  geo.py                    Conteo por provincia y localidad, mapa de provincias y de burbujas por localidad
   cache.py                  Limpieza, unificación mensual, reglas automáticas, áreas
   informe.py                Informe del mes descargable (nota Markdown)
   machinery.py              Clasificación de maquinaria por nombre del negocio
@@ -52,6 +52,7 @@ utils/
   branding.py, styling.py   Colores Cotear y coloreo de tablas
 data/
   codigos_area_argentina.json   Código de área → provincia
+  localidades_ar.json           Código de área → localidad cabecera y centroide (ENACOM + Georef)
   provincias_argentina.geojson  Contornos de provincias para el mapa (CABA dentro de Buenos Aires)
 scripts/                    Diagnóstico de Bitrix y creación del libro destino
 tests/                      Pruebas de funciones puras (pytest)
@@ -68,13 +69,14 @@ página abierta.
 - **Reporte mensual**: KPIs con variación contra el mes anterior (consultas,
   provincia y área principal, % sin interés real = sin respuestas + sin
   interés), distribución por clasificación (barras ⇄ torta), área de interés
-  (barras sólidas por derivación interna ⇄ segmentadas por clasificación), mapa + ranking de provincias y datos crudos del mes.
+  (barras sólidas por derivación interna ⇄ segmentadas por clasificación), mapa + ranking de provincias (clic en una
+  provincia: detalle por localidad) y datos crudos del mes.
 - **Negocios Bitrix24**: período libre (mes, trimestre, año, rango). Sólo
   cuenta los negocios **creados** dentro del período (con su etapa actual). Los
   KPIs se comparan con el período anterior de igual duración (mes, trimestre o
   año anterior; en un rango, los mismos días justo antes). Tipo de máquina ×
   etapa (total ⇄ etapas), motivos de baja (torta ⇄ barras), fuentes (sólidas ⇄
-  apiladas por etapa), mapa + ranking de provincias, campañas de anuncios
+  apiladas por etapa), mapa + ranking de provincias (con detalle por localidad), campañas de anuncios
   (total ⇄ por red ⇄ por etapa) y lista de negocios (columna Tipo maquinaria oculta).
 - **Clasificación manual**: selección de un reporte y guardado en cola; el
   botón *Sincronizar* de la barra lateral lo escribe en Sheets.
@@ -90,7 +92,7 @@ página abierta.
   importar la pantalla. Torta con leyenda a la derecha; nombres largos de
   barras en 2 renglones; leyendas de barras en columnas parejas. El mapa de
   provincias usa Plotly sin barra de herramientas (ECharts nativo no admite
-  contornos propios).
+  contornos propios); al hacer clic en una provincia muestra sus localidades.
 - Tarjetas blancas con borde suave y esquinas de 8 px, sin sombra ni acentos
   de color. Sin emojis: íconos Material sólo en las acciones principales.
 - Números con coma decimal ("14,3 %") en gráficos, mapa y KPIs; las tablas

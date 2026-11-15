@@ -442,7 +442,21 @@ def echart(
 PLOTLY_STATIC = {"displayModeBar": False, "scrollZoom": False, "displaylogo": False}
 
 
-def plotly_map(fig, *, key: str | None = None) -> None:
-    """Mapa Plotly sin barra de herramientas ni zoom (sólo tooltip)."""
+def plotly_map(fig, *, key: str | None = None, on_select: bool = False):
+    """Mapa Plotly sin barra de herramientas ni zoom (sólo tooltip).
+
+    Con ``on_select=True`` el clic sobre una figura re-ejecuta (la tarjeta, si
+    está en un fragment) y se devuelve el estado de selección de Streamlit."""
     fig.update_layout(dragmode=False)
-    st.plotly_chart(fig, width="stretch", config=PLOTLY_STATIC, key=key)
+    if not on_select:
+        st.plotly_chart(fig, width="stretch", config=PLOTLY_STATIC, key=key)
+        return None
+    fig.update_layout(clickmode="event+select")
+    return st.plotly_chart(
+        fig,
+        width="stretch",
+        config=PLOTLY_STATIC,
+        key=key,
+        on_select="rerun",
+        selection_mode="points",
+    )
