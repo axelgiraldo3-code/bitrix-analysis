@@ -2,7 +2,8 @@
 
 Al terminar cada conversación, el asistente de WhatsApp registra un resumen. La aplicación toma esos registros y agrega:
 
-- Provincia: se deduce de la característica del teléfono. Los números de otros países figuran como "Extranjero" y los que no tienen una característica reconocible, como "Sin identificar". La característica 11 (Ciudad de Buenos Aires y Gran Buenos Aires) se cuenta dentro de Buenos Aires.
+- Provincia: se deduce de la característica del teléfono. Los números de otros países figuran como "Extranjero", los que no tienen número como "Sin identificar" y los argentinos con una característica que no figura en la numeración oficial como "Sin verificar". La característica 11 (Ciudad de Buenos Aires y Gran Buenos Aires) se cuenta dentro de Buenos Aires.
+- Localidad: también sale de la característica, según la numeración geográfica del ENACOM. Cada característica corresponde a una localidad cabecera (la 11 figura como AMBA).
 - Área de interés: área a la que el asistente derivó la conversación (Máquinas, Repuestos o Servicio Técnico). Si no se puede determinar, figura como "No identificado".
 
 Si una persona escribe varias veces en el mismo mes, sus conversaciones se agrupan y cuenta como una sola consulta. En el detalle se pueden leer todos los resúmenes.
