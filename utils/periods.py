@@ -1,11 +1,16 @@
-"""Utilidades de períodos de tiempo para los filtros del Tab de Bitrix
-(mes, trimestre, año, rango personalizado).
+"""Utilidades de períodos de tiempo para el filtro compartido de las páginas
+(mes, trimestre, semestre, año, rango personalizado) y textos en español.
 """
 
 from __future__ import annotations
 
 import calendar
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
+
+KINDS = ["Mes", "Trimestre", "Semestre", "Año", "Rango personalizado"]
+_ORDINALS = {1: "primer", 2: "segundo", 3: "tercer", 4: "cuarto"}
+_NOUNS = {"Mes": "mes", "Trimestre": "trimestre", "Semestre": "semestre", "Año": "año"}
 
 
 def year_months_spanning(start: date, end: date) -> list[str]:
@@ -137,3 +142,113 @@ def period_label(start: date, end: date, kind: str, short: bool = False) -> str:
     if kind == "Año":
         return str(start.year)
     return f"{start.strftime('%d-%m-%y')} a {end.strftime('%d-%m-%y')}"
+
+
+def _ddmmyy(d: date) -> str:
+    return d.strftime("%d-%m-%y")
+
+
+@dataclass(frozen=True)
+class Period:
+    """Período elegido en el filtro: tipo (``KINDS``) y fechas, ambas inclusive."""
+
+    kind: str
+    start: date
+    end: date
+
+    @property
+    def is_month(self) -> bool:
+        return self.kind == "Mes"
+
+    @property
+    def year_month(self) -> str:
+        """'YYYY-MM' del primer mes (el mes elegido, en "Mes")."""
+        return f"{self.start.year:04d}-{self.start.month:02d}"
+
+    @property
+    def months(self) -> list[str]:
+        return year_months_spanning(self.start, self.end)
+
+    def months_to_date(self, today: date | None = None) -> list[str]:
+        """Meses del período que ya empezaron (vacío si el período es futuro)."""
+        cut = self.cutoff(today)
+        return year_months_spanning(self.start, cut) if cut >= self.start else []
+
+    @property
+    def last_month(self) -> str:
+        """Último mes ya empezado del período (o el primero, si es futuro):
+        el mes de referencia para los negocios de Bitrix."""
+        return (self.months_to_date() or [self.year_month])[-1]
+
+    @property
+    def previous(self) -> Period:
+        return Period(self.kind, *previous_period(self.start, self.end, self.kind))
+
+    def label(self, short: bool = False) -> str:
+        """'Octubre 2026' / 'T3 2026' / 'S2 2026' / '2026' / '05-10-26 a 14-10-26'
+        (``short`` en "Mes": 'oct-26')."""
+        return period_label(self.start, self.end, self.kind, short=short)
+
+    @property
+    def noun(self) -> str:
+        """'mes', 'trimestre', 'semestre', 'año' o 'período' ("del mes", ...)."""
+        return _NOUNS.get(self.kind, "período")
+
+    @property
+    def slug(self) -> str:
+        """Para nombres de archivo: '2026-10', '2026-T3', '2026-S2', '2026' o
+        '05-10-26_a_14-10-26'."""
+        y = self.start.year
+        if self.kind == "Mes":
+            return self.year_month
+        if self.kind == "Trimestre":
+            return f"{y}-T{current_quarter(self.start)}"
+        if self.kind == "Semestre":
+            return f"{y}-S{current_semester(self.start)}"
+        if self.kind == "Año":
+            return str(y)
+        return range_label(self.start, self.end)
+
+    @property
+    def phrase(self) -> str:
+        """Para textos ("durante …"): 'el mes de octubre', 'el tercer trimestre
+        de 2026', 'el segundo semestre de 2026', 'el año 2026' o 'el período
+        del 05-10-26 al 14-10-26'."""
+        y = self.start.year
+        if self.kind == "Mes":
+            return f"el mes de {MONTHS_ES_FULL[self.start.month - 1]}"
+        if self.kind == "Trimestre":
+            return f"el {_ORDINALS[current_quarter(self.start)]} trimestre de {y}"
+        if self.kind == "Semestre":
+            return f"el {_ORDINALS[current_semester(self.start)]} semestre de {y}"
+        if self.kind == "Año":
+            return f"el año {y}"
+        return f"el período del {_ddmmyy(self.start)} al {_ddmmyy(self.end)}"
+
+    def cutoff(self, today: date | None = None) -> date:
+        """Último día con datos: el fin del período o hoy, si todavía no terminó."""
+        return min(self.end, today or datetime.now().date())
+
+    def detail(self, today: date | None = None) -> str:
+        """Descripción completa del período para el informe:
+        'Tercer trimestre de 2026 (T3) · julio a septiembre · 01-07-26 a 30-09-26',
+        con '(en curso, datos al 17-11-26)' si todavía no terminó."""
+        span = f"{_ddmmyy(self.start)} a {_ddmmyy(self.end)}"
+        first = MONTHS_ES_FULL[self.start.month - 1]
+        last = MONTHS_ES_FULL[self.end.month - 1]
+        if self.kind == "Mes":
+            parts = [self.label(), span]
+        elif self.kind in ("Trimestre", "Semestre"):
+            name = self.phrase.removeprefix("el ")
+            code = self.slug.split("-")[1]
+            parts = [f"{name[0].upper()}{name[1:]} ({code})", f"{first} a {last}", span]
+        elif self.kind == "Año":
+            parts = [f"Año {self.start.year}", f"{first} a {last}", span]
+        else:
+            days = (self.end - self.start).days + 1
+            parts = [f"Del {_ddmmyy(self.start)} al {_ddmmyy(self.end)} ({days} días)"]
+        text = " · ".join(parts)
+        cut = self.cutoff(today)
+        if cut < self.end:
+            text += f" (en curso, datos al {_ddmmyy(cut)})"
+        return text
