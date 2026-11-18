@@ -316,16 +316,55 @@ def test_locality_counts_within_province():
     assert geo.locality_counts(zones, locs, "Salta").empty
 
 
-def test_locality_map_bubbles_only_located():
+def test_locality_map_political_with_callouts():
     t = pd.DataFrame({"Localidad": ["Rosario", "Rafaela", "Sin verificar"], "Cantidad": [3, 1, 1]})
-    fig = geo.locality_map(t, "Santa Fe")
-    base, bubbles = fig.data
-    assert list(base.locations) == ["Santa Fe"]
-    assert [cd[0] for cd in bubbles.customdata] == ["Rosario", "Rafaela"]
-    assert list(bubbles.text) == ["60,0 %", "20,0 %"]
-    assert fig.layout.geo.fitbounds == "locations"
+    fig = geo.locality_map(t, "Santa Fe", height=420)
+    by_name = {tr.type: [] for tr in fig.data}
+    for tr in fig.data:
+        by_name[tr.type].append(tr)
+    neighbors, depts, outline = by_name["choropleth"]
+    assert "Santa Fe" not in neighbors.locations and "Córdoba" in neighbors.locations
+    assert len(depts.locations) == 19  # departamentos de Santa Fe (IGN)
+    assert list(outline.locations) == ["Santa Fe"]
+    bubbles = next(tr for tr in by_name["scattergeo"] if tr.customdata is not None)
+    assert [cd[0] for cd in bubbles.customdata] == ["Rosario", "Rafaela"]  # sin "Sin verificar"
+    texts = [x for tr in by_name["scattergeo"] if tr.mode == "text" for x in tr.text]
+    assert "<b>Rosario</b> 60,0 %" in texts and "<b>Rafaela</b> 20,0 %" in texts
+    arrows = next(tr for tr in by_name["scattergeo"] if tr.marker.symbol == "arrow")
+    assert len(arrows.lon) == 2
+    assert fig.layout.geo.fitbounds is False
     assert "Sin verificar" in geo.outside_locality_note(t, "Santa Fe")
     assert not geo.locality_map(t, "Provincia inexistente").data
+
+
+def test_callout_layout_spreads_labels():
+    # Tres burbujas casi a la misma altura del lado derecho: las etiquetas
+    # quedan separadas al menos un renglón y fuera de la provincia
+    box = (-62.0, -33.0, -60.0, -28.0)
+    bubbles = [(-60.5, -30.0, 12), (-60.6, -30.05, 10), (-60.4, -29.98, 14)]
+    labels, frame, scale = geo._callout_layout(bubbles, box, 420)
+    ys = sorted(y for _, y, _ in labels)
+    assert all(b - a >= geo.LINE_PX / scale - 1e-9 for a, b in zip(ys, ys[1:]))
+    assert all(side == "right" and lon > box[2] for lon, _, side in labels)
+    # Encuadre: a lo sumo FRAME_ASPECT_MAX veces más ancho que alto
+    x0, y0, x1, y1 = frame
+    assert (x1 - x0) / (y1 - y0) <= geo.FRAME_ASPECT_MAX + 1e-9
+
+
+def test_arrow_touches_bubble_edge():
+    # Etiqueta a la izquierda: la flecha apunta a la derecha (90°) y su
+    # centro queda a radio + media flecha del centro de la burbuja
+    lon, y, angle = geo._arrow(0.0, 0.0, 10.0, 0.0, radius_px=10, scale=2.0)
+    assert angle == pytest.approx(90.0)
+    assert (10.0 - lon) * 2.0 == pytest.approx(10 + geo.ARROW_PX / 2)
+    assert y == pytest.approx(0.0)
+
+
+def test_departments_cover_all_provinces():
+    depts = geo.load_departments()
+    provinces = {f["id"] for f in geo.load_provinces()["features"]}
+    assert set(depts) == provinces
+    assert len(depts["Buenos Aires"]["features"]) == 135 + 15  # partidos + comunas de CABA
 
 
 def test_geojson_has_all_provinces():
