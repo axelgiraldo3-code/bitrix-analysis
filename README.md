@@ -53,6 +53,7 @@ utils/
 data/
   codigos_area_argentina.json   Código de área → provincia
   localidades_ar.json           Código de área → localidad cabecera y centroide (ENACOM + Georef)
+  departamentos_ar.geojson      Departamentos y partidos (IGN vía Georef) para el detalle por provincia
   provincias_argentina.geojson  Contornos de provincias para el mapa (CABA dentro de Buenos Aires)
 scripts/                    Diagnóstico de Bitrix y creación del libro destino
 tests/                      Pruebas de funciones puras (pytest)
@@ -92,7 +93,8 @@ página abierta.
   importar la pantalla. Torta con leyenda a la derecha; nombres largos de
   barras en 2 renglones; leyendas de barras en columnas parejas. El mapa de
   provincias usa Plotly sin barra de herramientas (ECharts nativo no admite
-  contornos propios); al hacer clic en una provincia muestra sus localidades.
+  contornos propios); al hacer clic en una provincia muestra su mapa político (departamentos) con
+  burbujas por localidad y etiquetas con flecha.
 - Tarjetas blancas con borde suave y esquinas de 8 px, sin sombra ni acentos
   de color. Sin emojis: íconos Material sólo en las acciones principales.
 - Números con coma decimal ("14,3 %") en gráficos, mapa y KPIs; las tablas

@@ -31,7 +31,7 @@ Al comparar ambas vistas se ve, por ejemplo, cuántas de las consultas que el as
 
 El mapa colorea cada provincia según su porcentaje de consultas: cuanto más oscuro, más consultas. Sólo se muestran las provincias que tuvieron alguna. A la derecha, el ranking incluye también, en gris, las consultas del extranjero, las sin verificar y las no identificadas, que no se pueden ubicar en el mapa.
 
-Al hacer clic en una provincia se ve su distribución por localidad: el mapa se acerca a la provincia y muestra un círculo por localidad (más grande y más oscuro, más consultas), con el porcentaje dentro de la provincia. El ranking y la tabla también pasan a localidades. El botón "Todas las provincias" vuelve al mapa completo.
+Al hacer clic en una provincia se ve su distribución por localidad: el mapa se acerca a la provincia, con sus departamentos o partidos y las provincias vecinas alrededor, y muestra un círculo por localidad (más grande y más oscuro, más consultas). Las localidades principales tienen una etiqueta con su nombre y el porcentaje dentro de la provincia, con una flecha hacia su círculo; pasando el mouse se ven la cantidad y el nombre de cada departamento. El ranking y la tabla también pasan a localidades. El botón "Todas las provincias" vuelve al mapa completo.
 
 ## Cuándo llegan las consultas
 
