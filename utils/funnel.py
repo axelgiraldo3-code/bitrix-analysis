@@ -1,6 +1,6 @@
 """Embudo consultas → negocios → ganados (funciones puras).
 
-Cruza las consultas del mes (bot) con los negocios de Bitrix por teléfono
+Cruza las consultas del período (bot) con los negocios de Bitrix por teléfono
 (dígitos significativos). Para cada consulta derivada se toma el negocio
 más avanzado de ese teléfono. Un negocio perdido cuenta como "cotizado" si
 su etapa anterior ya era de cotización o posterior.
@@ -15,6 +15,13 @@ from .branding import _plain
 DERIVADO = "DERIVADO A BITRIX"
 
 STAGES = ["Consultas del mes", "Derivadas a Bitrix", "Cotizadas", "Ganadas"]
+
+
+def stages(noun: str = "mes") -> list[str]:
+    """``STAGES`` con la primera etapa del período ("Consultas del trimestre")."""
+    return [f"Consultas del {noun}", *STAGES[1:]]
+
+
 # Colores de cada etapa (de claro a azul Cotear; ganadas en verde)
 COLORS = ["#9DB9D6", "#4F80B5", "#01498E", "#11734B"]
 

@@ -5,6 +5,7 @@ falsos en memoria (sin red ni datos reales). No revisa el aspecto visual:
 sólo detecta errores de ejecución antes de abrir la app.
 """
 
+import re
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -12,7 +13,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 from streamlit.util import calc_hash
 
-from utils import bitrix, pending, sheets
+from utils import bitrix, pending, periods, sheets
 
 _NOW = datetime.now()
 _YM = _NOW.strftime("%Y-%m")
@@ -204,6 +205,53 @@ def test_page_runs(fake_io, url_path):
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert not [w.value for w in at.warning if "prueba de humo" in w.value]
+
+
+@pytest.mark.parametrize("url_path", ["reporte", "negocios", "analisis"])
+@pytest.mark.parametrize("kind", ["Trimestre", "Año", "Rango personalizado"])
+def test_page_runs_with_period(fake_io, url_path, kind):
+    """Las tres páginas con filtro de período abren con períodos de varios
+    meses (elegido en Reporte, la página por defecto, y conservado al cambiar)."""
+    at = AppTest.from_file("../app.py", default_timeout=30)
+    at.run()
+    at.session_state["periodo_tipo"] = kind
+    start = _NOW.date()
+    if kind == "Rango personalizado":
+        start = (_NOW - timedelta(days=40)).date()
+        at.session_state["periodo_desde"] = start
+        at.session_state["periodo_hasta"] = _NOW.date()
+    at.run()
+    at._page_hash = calc_hash(url_path)
+    # En AppTest la primera ejecución tras cambiar de página usa los valores
+    # por defecto de los widgets; la segunda, los conservados (igual con "mes")
+    at.run()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not [w.value for w in at.warning if "prueba de humo" in w.value]
+    label = {
+        "Trimestre": f"T{periods.current_quarter(_NOW)} {_NOW.year}",
+        "Año": str(_NOW.year),
+        "Rango personalizado": periods.period_label(start, _NOW.date(), kind),
+    }[kind]
+    pattern = rf"· {re.escape(label)}( comparado|</div>)"
+    assert any(re.search(pattern, m.value) for m in at.markdown), label
+
+
+def test_period_kept_between_pages(fake_io):
+    """El período elegido en una página es el mismo en las otras dos."""
+    at = AppTest.from_file("../app.py", default_timeout=30)
+    at.run()
+    at._page_hash = calc_hash("reporte")
+    at.session_state["periodo_tipo"] = "Semestre"
+    at.run()
+    sem = f"S{1 if _NOW.month <= 6 else 2} {_NOW.year}"
+    for url_path in ("negocios", "analisis"):
+        at._page_hash = calc_hash(url_path)
+        at.run()
+        at.run()  # ver test_page_runs_with_period
+        assert not at.exception, [e.value for e in at.exception]
+        assert at.selectbox(key="periodo_tipo").value == "Semestre"
+        assert any(f"· {sem}" in m.value for m in at.markdown), url_path
 
 
 @pytest.mark.parametrize(

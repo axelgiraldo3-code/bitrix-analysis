@@ -1,5 +1,7 @@
-"""Informe mensual descargable: una nota Markdown (estilo Obsidian) con las
-tablas armadas y los enlaces a los gráficos, para revisar y completar a mano.
+"""Informe del período descargable: una nota Markdown (estilo Obsidian) con
+las tablas armadas y los enlaces a los gráficos, para revisar y completar a
+mano. El período es el del filtro compartido (mes, trimestre, semestre, año o
+rango) y se detalla en un recuadro debajo del título.
 
 Los gráficos no se generan acá: la nota enlaza ``img/<nombre>.svg`` (a 500 px
 de ancho) con el nombre que la app le pone a cada gráfico al descargarlo
@@ -8,10 +10,9 @@ junto a la nota.
 
 Sigue la plantilla del reporte de actividad (el primero fue septiembre
 2026). Los números salen de:
-- Consultas: los reportes del bot del mes, ya procesados y clasificados.
-- Negocios: sólo los creados en el mes, con su etapa actual (los de meses
-  anteriores que se movieron en el mes quedan para los análisis semestrales
-  o anuales).
+- Consultas: los reportes del bot del período, ya procesados y clasificados.
+- Negocios: sólo los creados en el período, con su etapa actual (los
+  anteriores que se movieron en el período no se cuentan).
 
 Los textos de conclusiones quedan como borrador marcado para revisar.
 """
@@ -19,6 +20,7 @@ Los textos de conclusiones quedan como borrador marcado para revisar.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date
 
 import pandas as pd
 
@@ -52,14 +54,15 @@ IMG_WIDTH = 500
 # ---------------------------------------------------------------------------
 # Datos
 # ---------------------------------------------------------------------------
-def month_deals(deals: pd.DataFrame, year_month: str) -> pd.DataFrame:
-    """Negocios creados en el mes, con fuente y motivo unificados, zona y
-    marca de perdido. ``deals`` puede traer otros meses (el snapshot del mes
-    incluye los negocios viejos que se movieron): se descartan."""
+def period_deals(deals: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    """Negocios creados entre ``start`` y ``end`` (inclusive), con fuente y
+    motivo unificados, zona y marca de perdido. ``deals`` puede traer otros
+    (el snapshot de cada mes incluye los negocios viejos que se movieron): se
+    descartan."""
     if deals.empty:
         return deals.assign(Zona=[], _perdido=[])
-    created = pd.to_datetime(deals["Fecha creacion"], format="%d-%m-%y", errors="coerce")
-    d = deals[created.dt.strftime("%Y-%m") == year_month].copy()
+    created = pd.to_datetime(deals["Fecha creacion"], format="%d-%m-%y", errors="coerce").dt.date
+    d = deals[(created >= start) & (created <= end)].copy()
     if d.empty:
         return d.assign(Zona=[], _perdido=[])
     d["Fuente"] = (d["Fuente"] if "Fuente" in d else pd.Series("", index=d.index)).map(
@@ -228,14 +231,14 @@ def md_table(
     return "\n".join(lines)
 
 
-def chart_names(year_month: str) -> dict[str, str]:
+def chart_names(period: periods.Period) -> dict[str, str]:
     """Nombre del SVG que descarga la app para cada gráfico del informe
-    (mismos nombres que usan las páginas: ``clasificaciones_2026-10``,
-    ``negocios_por_fuente_01-10-26_a_31-10-26``, ...)."""
-    label = periods.range_label(*periods.month_bounds(year_month))
+    (mismos nombres que usan las páginas: ``clasificaciones_2026-10`` o
+    ``clasificaciones_2026-T3``, ``negocios_por_fuente_01-10-26_a_31-10-26``, ...)."""
+    label = periods.range_label(period.start, period.end)
     return {
-        "clasificacion": f"clasificaciones_{year_month}.svg",
-        "embudo": f"embudo_{year_month}.svg",
+        "clasificacion": f"clasificaciones_{period.slug}.svg",
+        "embudo": f"embudo_{period.slug}.svg",
         "fuentes": f"negocios_por_fuente_{label}.svg",
         "provincias": f"provincias_negocios_{label}.svg",
         "motivos": f"motivos_baja_{label}.svg",
@@ -255,12 +258,12 @@ def _list_es(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " y " + items[-1]
 
 
-def funnel_table(counts: list[int]) -> pd.DataFrame:
+def funnel_table(counts: list[int], noun: str = "mes") -> pd.DataFrame:
     """[Etapa | Cantidad | % de las consultas | % de la etapa anterior]."""
     first = counts[0]
     return pd.DataFrame(
         {
-            "Etapa": funnel.STAGES,
+            "Etapa": funnel.stages(noun),
             "Cantidad": counts,
             "% de las consultas": [_pct(c, first) for c in counts],
             "% de la etapa anterior": [None]
@@ -269,16 +272,30 @@ def funnel_table(counts: list[int]) -> pd.DataFrame:
     )
 
 
+def title(period: periods.Period) -> str:
+    """'REPORTE DE ACTIVIDAD COMERCIAL - OCTUBRE 2026' / '- T3 2026' / '- AÑO 2026'."""
+    label = f"Año {period.start.year}" if period.kind == "Año" else period.label()
+    return f"REPORTE DE ACTIVIDAD COMERCIAL - {label.upper()}"
+
+
+def period_callout(period: periods.Period, today: date | None = None) -> str:
+    """Recuadro con el período trabajado, debajo del título."""
+    return f"> [!info] Período analizado\n> {period.detail(today)}"
+
+
 def build(
-    bot: pd.DataFrame, deals: pd.DataFrame, year_month: str, funnel_counts: list[int] | None = None
+    bot: pd.DataFrame,
+    deals: pd.DataFrame,
+    period: periods.Period,
+    funnel_counts: list[int] | None = None,
+    today: date | None = None,
 ) -> str:
-    """Markdown del informe del mes. ``funnel_counts``: etapas del embudo
+    """Markdown del informe del período. ``funnel_counts``: etapas del embudo
     (``funnel.funnel_counts``); sin ellas no va la 1.2."""
-    month_txt = periods.month_label(year_month, full=True)
-    d = month_deals(deals, year_month)
-    img = chart_names(year_month)
-    month_name = month_txt.split()[0].lower()
-    out: list[str] = [f"# REPORTE DE ACTIVIDAD COMERCIAL - {month_txt.upper()}", ""]
+    d = period_deals(deals, period.start, period.end)
+    img = chart_names(period)
+    noun = period.noun
+    out: list[str] = [f"# {title(period)}", "", period_callout(period, today), ""]
 
     # --- tablas ------------------------------------------------------------
     n_bot = len(bot)
@@ -302,7 +319,7 @@ def build(
     out += [
         "## Resumen y highlights",
         "",
-        REVISAR + "Borrador armado con los datos del mes: revisar y completar.",
+        REVISAR + f"Borrador armado con los datos del {noun}: revisar y completar.",
         "",
     ]
     if n_bot:
@@ -318,7 +335,7 @@ def build(
         out.append(
             f"- **Canales clave:** {names} "
             f"{'representan' if len(top) > 1 else 'representa'} el "
-            f"{pct_label(_pct(top['Cantidad'].sum(), n_deals))} de los negocios del mes."
+            f"{pct_label(_pct(top['Cantidad'].sum(), n_deals))} de los negocios del {noun}."
         )
     if n_lost:
         out.append(
@@ -339,7 +356,7 @@ def build(
         "## 1. Análisis de consultas entrantes",
         "",
         f"Se registraron **{n_bot} consultas** en frío a través del canal de Redes Sociales "
-        f"durante el mes de {month_name}.",
+        f"durante {period.phrase}.",
         "",
         "### 1.1 Calidad del tráfico inicial",
         "",
@@ -349,7 +366,7 @@ def build(
             *_img(
                 img["clasificacion"],
                 "Calidad de las consultas",
-                "Reporte mensual · Por clasificación (barras)",
+                "Reporte de consultas · Por clasificación (barras)",
             ),
             "",
             md_table(
@@ -363,7 +380,7 @@ def build(
             "",
         ]
     else:
-        out += ["Sin consultas en el mes.", ""]
+        out += [f"Sin consultas en el {noun}.", ""]
 
     if funnel_counts and funnel_counts[0]:
         ganadas = funnel_counts[-1]
@@ -375,13 +392,14 @@ def build(
             ),
             "",
             md_table(
-                funnel_table(funnel_counts),
+                funnel_table(funnel_counts, noun),
                 pct_cols=("% de las consultas", "% de la etapa anterior"),
             ),
             "",
             "> [!note] Cómo se cruzan consultas y negocios",
             "> Las consultas derivadas se buscan por teléfono entre los negocios con "
-            "actividad en el mes o en el siguiente; si hay varios, cuenta el más avanzado. "
+            f"actividad en el {noun} o en el {'' if period.is_month else 'mes '}siguiente; "
+            "si hay varios, cuenta el más avanzado. "
             '**Cotizadas:** el negocio llegó a "Cotizado aguardando devolución" o más '
             '(un perdido cuenta si se perdió después de cotizar). **Ganadas:** "Ganado en '
             'Desarrollo" o "Cerrado Ganado".',
@@ -395,7 +413,7 @@ def build(
         out += [
             "## 2. Fuentes de origen (pipeline Bitrix)",
             "",
-            "Sin negocios de Bitrix en el mes.",
+            f"Sin negocios de Bitrix en el {noun}.",
             "",
         ]
         return "\n".join(out)
@@ -404,7 +422,7 @@ def build(
     out += [
         "## 2. Fuentes de origen (pipeline Bitrix)",
         "",
-        f"Se crearon **{n_deals} negocios** de venta de máquinas en {month_name}.",
+        f"Se crearon **{n_deals} negocios** de venta de máquinas durante {period.phrase}.",
         "",
         "### 2.1 Distribución por canales",
         "",
@@ -413,7 +431,7 @@ def build(
         *_img(
             img["fuentes"],
             "Negocios por fuente",
-            "Negocios Bitrix24 (período Mes) · Por fuente (barras sólidas)",
+            f"Negocios Bitrix24 (período {period.kind}) · Por fuente (barras sólidas)",
         ),
         "",
         md_table(sources, pct_cols=("%",), total_row={"Fuente": "TOTAL", "Cantidad": n_deals}),
@@ -521,7 +539,7 @@ def build(
         md_table(stages, pct_cols=("%",), total_row={"Etapa": "TOTAL", "Cantidad": n_deals}),
         "",
         "> [!note] Acumulación",
-        f"> El {pct_label(_pct(n_lost, n_deals))} de los negocios de {month_name} "
+        f"> El {pct_label(_pct(n_lost, n_deals))} de los negocios del {noun} "
         "ya terminó en negocio perdido.",
         "",
         "## Recomendaciones finales",
@@ -534,13 +552,17 @@ def build(
     return "\n".join(out)
 
 
-def file_name(year_month: str) -> str:
-    return f"Reporte de actividad {year_month}.md"
+def file_name(period: periods.Period) -> str:
+    """'Reporte de actividad 2026-10.md' / '… 2026-T3.md' / '… 2026.md'."""
+    return f"Reporte de actividad {period.slug}.md"
 
 
 def md_builder(
-    bot: pd.DataFrame, deals: pd.DataFrame, year_month: str, funnel_counts: list[int] | None = None
+    bot: pd.DataFrame,
+    deals: pd.DataFrame,
+    period: periods.Period,
+    funnel_counts: list[int] | None = None,
 ) -> Callable[[], bytes]:
     """Función sin argumentos para ``st.download_button`` (arma la nota recién
     al hacer clic)."""
-    return lambda: build(bot, deals, year_month, funnel_counts).encode("utf-8")
+    return lambda: build(bot, deals, period, funnel_counts).encode("utf-8")
