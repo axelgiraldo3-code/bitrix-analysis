@@ -1,4 +1,4 @@
-En esta página se revisa cada consulta del mes y se le asigna su clasificación interna. Sin este paso, el [[Reporte mensual]] no puede mostrar la calidad real de las consultas.
+En esta página se revisa cada consulta del mes y se le asigna su clasificación interna. Sin este paso, el [[Reporte de consultas]] no puede mostrar la calidad real de las consultas.
 
 ## Cómo clasificar
 

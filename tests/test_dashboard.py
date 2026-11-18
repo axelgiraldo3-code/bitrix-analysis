@@ -46,6 +46,44 @@ def test_month_labels():
     assert periods.month_label("2026-09", full=True) == "Septiembre 2026"
 
 
+def test_period_object():
+    q4 = periods.Period("Trimestre", date(2026, 10, 1), date(2026, 12, 31))
+    assert q4.months == ["2026-10", "2026-11", "2026-12"]
+    assert q4.months_to_date(date(2026, 11, 17)) == ["2026-10", "2026-11"]
+    assert q4.cutoff(date(2026, 11, 17)) == date(2026, 11, 17)
+    assert q4.previous == periods.Period("Trimestre", date(2026, 7, 1), date(2026, 9, 30))
+    assert (q4.label(), q4.noun, q4.slug) == ("T4 2026", "trimestre", "2026-T4")
+    assert q4.phrase == "el cuarto trimestre de 2026"
+    oct_ = periods.Period("Mes", date(2026, 10, 1), date(2026, 10, 31))
+    assert (oct_.label(), oct_.label(short=True), oct_.slug) == (
+        "Octubre 2026",
+        "oct-26",
+        "2026-10",
+    )
+    assert oct_.is_month and oct_.year_month == "2026-10"
+    rng = periods.Period("Rango personalizado", date(2026, 9, 28), date(2026, 10, 3))
+    assert rng.months == ["2026-09", "2026-10"] and rng.noun == "período"
+    future = periods.Period("Año", date(2030, 1, 1), date(2030, 12, 31))
+    assert future.months_to_date(date(2026, 11, 17)) == []
+
+
+def test_weekday_counts_between():
+    from utils.trends import weekday_counts_between
+
+    dts = pd.Series(
+        pd.to_datetime(["2026-09-28 10:00", "2026-10-05 09:00", "2026-10-06 11:00", "2026-11-02 08:00"])
+    )
+    # Lunes 28-09 al sábado 10-10: dos lunes y un martes con consultas; el 02-11 queda afuera
+    totals, n_days = weekday_counts_between(dts, date(2026, 9, 28), date(2026, 10, 10))
+    assert totals == [2, 1, 0, 0, 0, 0, 0]
+    assert n_days == [2, 2, 2, 2, 2, 2, 1]
+    # En curso: los días se cuentan hasta hoy
+    _, n_days = weekday_counts_between(
+        dts, date(2026, 9, 28), date(2026, 10, 10), today=date(2026, 9, 30)
+    )
+    assert n_days == [1, 1, 1, 0, 0, 0, 0]
+
+
 # --- KPIs ---------------------------------------------------------------------
 def test_delta_positive_indicator():
     kw = kpis.delta_kwargs(10, 7, kpis.UP_GOOD, vs="vs. sep-26")

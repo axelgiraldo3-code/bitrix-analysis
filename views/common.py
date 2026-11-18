@@ -1,6 +1,9 @@
-"""Piezas compartidas entre páginas: filtro de mes y tarjeta de provincias."""
+"""Piezas compartidas entre páginas: filtros de mes y de período y tarjeta de
+provincias."""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -8,12 +11,14 @@ import streamlit as st
 from utils import charts, geo, periods, ui
 from utils.branding import COTEAR_BLUE, COTEAR_GRAY
 
+# El mes es el mismo en el filtro de período y en Clasificación manual
 MONTH_KEY = "mes"
+MIN_YEAR = 2015
 
 
 def month_filter(months: list[str]) -> str:
-    """Selector de mes en la barra lateral, compartido por las páginas de
-    consultas (se conserva al cambiar de página)."""
+    """Selector de mes en la barra lateral (Clasificación manual; se conserva
+    al cambiar de página y es el mismo mes del filtro de período)."""
     if st.session_state.get(MONTH_KEY) not in months:
         st.session_state.pop(MONTH_KEY, None)
     return st.sidebar.selectbox(
@@ -23,6 +28,93 @@ def month_filter(months: list[str]) -> str:
         persist_state="session",
         format_func=lambda ym: periods.month_label(ym, full=True),
     )
+
+
+def _year_input(container, key: str, today) -> int:
+    return int(
+        container.number_input(
+            "Año",
+            min_value=MIN_YEAR,
+            max_value=today.year + 1,
+            value=today.year,
+            step=1,
+            key=key,
+            persist_state="session",
+        )
+    )
+
+
+def period_filter(months: list[str], *, reload_button: bool = False) -> periods.Period | None:
+    """Selector de período en la barra lateral, compartido por Reporte,
+    Negocios y Análisis: las mismas keys en las tres páginas, así el período
+    se conserva al cambiar de página. ``None`` si el rango no es válido.
+
+    ``reload_button``: "Recargar período desde API" (páginas que leen Bitrix
+    por período; deja el pedido en ``_force_period``)."""
+    today = datetime.now().date()
+    sb = st.sidebar
+    kind = sb.selectbox("Período", periods.KINDS, key="periodo_tipo", persist_state="session")
+    if kind == "Mes":
+        start, end = periods.month_bounds(month_filter(months))
+    elif kind == "Trimestre":
+        c1, c2 = sb.columns(2)
+        year = _year_input(c1, "periodo_t_anio", today)
+        q = c2.selectbox(
+            "Trimestre",
+            [1, 2, 3, 4],
+            index=periods.current_quarter(today) - 1,
+            format_func=lambda n: f"T{n}",
+            key="periodo_t_num",
+            persist_state="session",
+        )
+        start, end = periods.quarter_bounds(year, q)
+    elif kind == "Semestre":
+        c1, c2 = sb.columns(2)
+        year = _year_input(c1, "periodo_s_anio", today)
+        sem = c2.selectbox(
+            "Semestre",
+            [1, 2],
+            index=periods.current_semester(today) - 1,
+            format_func=lambda n: f"S{n}",
+            key="periodo_s_num",
+            persist_state="session",
+        )
+        start, end = periods.semester_bounds(year, sem)
+    elif kind == "Año":
+        start, end = periods.year_bounds(_year_input(sb, "periodo_anio", today))
+    else:
+        start = sb.date_input(
+            "Desde",
+            value=today.replace(day=1),
+            key="periodo_desde",
+            format="DD/MM/YYYY",
+            persist_state="session",
+        )
+        end = sb.date_input(
+            "Hasta", value=today, key="periodo_hasta", format="DD/MM/YYYY", persist_state="session"
+        )
+        if start > end:
+            sb.error("'Desde' no puede ser posterior a 'Hasta'.")
+            return None
+    if reload_button and sb.button(
+        "Recargar período desde API",
+        help="Fuerza traer todos los meses del período desde Bitrix24 "
+        "(ignora snapshots). Puede tardar si el período es largo.",
+        key="periodo_recargar",
+        width="stretch",
+    ):
+        st.session_state["_force_period"] = True
+        st.rerun()
+    return periods.Period(kind, start, end)
+
+
+def period_vs(period: periods.Period) -> str:
+    """Subtítulo del encabezado: 'Octubre 2026 comparado con septiembre 2026',
+    'T3 2026 comparado con T2 2026'."""
+    prev = period.previous.label()
+    if period.is_month:
+        prev = prev[0].lower() + prev[1:]
+    return f"{period.label()} comparado con {prev}"
 
 
 TYPE_MAP = ":material/map:"

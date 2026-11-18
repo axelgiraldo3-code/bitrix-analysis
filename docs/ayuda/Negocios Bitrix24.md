@@ -8,7 +8,7 @@ De esta forma se evalúa la calidad de lo que ingresó en cada período. La cont
 
 ## Período
 
-En la barra lateral se elige un mes, un trimestre (T1 a T4), un semestre (S1 de enero a junio, S2 de julio a diciembre), un año o un rango de fechas. El botón "Recargar período desde API" vuelve a traer la información de Bitrix24; en períodos largos puede demorar.
+En la barra lateral se elige (y se comparte con Reporte de consultas y Análisis preliminar) un mes, un trimestre (T1 a T4), un semestre (S1 de enero a junio, S2 de julio a diciembre), un año o un rango de fechas. El botón "Recargar período desde API" vuelve a traer la información de Bitrix24; en períodos largos puede demorar.
 
 ## Indicadores
 

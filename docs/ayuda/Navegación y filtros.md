@@ -4,7 +4,7 @@ La aplicación reúne dos fuentes que normalmente se revisan por separado: las c
 
 Las páginas están en el menú de la barra lateral:
 
-- [[Reporte mensual]]: cantidad de consultas del mes, su calidad, de qué provincias llegan y en qué días y horarios.
+- [[Reporte de consultas]]: cantidad de consultas del período, su calidad, de qué provincias llegan y en qué días y horarios.
 - [[Negocios Bitrix24]]: negocios de venta de máquinas creados en un período y su situación actual.
 - [[Clasificación manual]]: revisión de cada consulta para asignarle una clasificación.
 - [[Análisis preliminar]]: gráficos en prueba que combinan consultas y negocios.
@@ -14,8 +14,8 @@ Las páginas están en el menú de la barra lateral:
 
 Los filtros aparecen en la barra lateral, debajo del menú.
 
-- Mes: lo comparten Reporte mensual, Clasificación manual y Análisis preliminar. Al elegir un mes en una de ellas, las otras muestran el mismo.
-- Período: se usa sólo en Negocios Bitrix24 y permite elegir un mes, un trimestre, un semestre, un año o un rango de fechas.
+- Período: lo comparten Reporte de consultas, Negocios Bitrix24 y Análisis preliminar. Permite elegir un mes, un trimestre (T1 a T4), un semestre (S1 de enero a junio, S2 de julio a diciembre), un año o un rango de fechas. Al elegir un período en una de ellas, las otras muestran el mismo.
+- Mes: Clasificación manual trabaja siempre sobre un mes, el mismo que se elige en Período cuando está en "Mes".
 
 La selección se mantiene al pasar de una página a otra.
 

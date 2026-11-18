@@ -53,7 +53,7 @@ page = st.navigation(
     [
         st.Page(
             reporte.render,
-            title="Reporte mensual",
+            title="Reporte de consultas",
             icon=":material/insights:",
             url_path="reporte",
             default=True,

@@ -20,7 +20,7 @@ from utils.branding import (
     source_color,
 )
 from utils.styling import style_bitrix_table
-from views.common import zones_card
+from views.common import period_filter, period_vs, zones_card
 
 TYPE_PIE = ":material/donut_large:"
 TYPE_BAR = ":material/align_horizontal_left:"
@@ -39,110 +39,6 @@ CHART_H = 500
 EVOL_H = 340
 # Altura común de "por fuente" y "por provincia"
 BOTTOM_H = 380
-PERIOD_KINDS = ["Mes", "Trimestre", "Semestre", "Año", "Rango personalizado"]
-
-
-# ---------------------------------------------------------------------------
-# Filtro de período (barra lateral)
-# ---------------------------------------------------------------------------
-def _period_filter(months: list[str]):
-    today = datetime.now().date()
-    sb = st.sidebar
-    kind = sb.selectbox("Período", PERIOD_KINDS, key="bitrix_period_type", persist_state="session")
-    if kind == "Mes":
-        ym = sb.selectbox(
-            "Mes",
-            months,
-            key="bitrix_period_month",
-            persist_state="session",
-            format_func=lambda m: periods.month_label(m, full=True),
-        )
-        start, end = periods.month_bounds(ym)
-    elif kind == "Trimestre":
-        c1, c2 = sb.columns(2)
-        year = int(
-            c1.number_input(
-                "Año",
-                min_value=2015,
-                max_value=today.year + 1,
-                value=today.year,
-                step=1,
-                key="bitrix_q_year",
-                persist_state="session",
-            )
-        )
-        q = c2.selectbox(
-            "Trimestre",
-            [1, 2, 3, 4],
-            index=periods.current_quarter(today) - 1,
-            format_func=lambda n: f"T{n}",
-            key="bitrix_q_num",
-            persist_state="session",
-        )
-        start, end = periods.quarter_bounds(year, q)
-    elif kind == "Semestre":
-        c1, c2 = sb.columns(2)
-        year = int(
-            c1.number_input(
-                "Año",
-                min_value=2015,
-                max_value=today.year + 1,
-                value=today.year,
-                step=1,
-                key="bitrix_s_year",
-                persist_state="session",
-            )
-        )
-        sem = c2.selectbox(
-            "Semestre",
-            [1, 2],
-            index=periods.current_semester(today) - 1,
-            format_func=lambda n: f"S{n}",
-            key="bitrix_s_num",
-            persist_state="session",
-        )
-        start, end = periods.semester_bounds(year, sem)
-    elif kind == "Año":
-        year = int(
-            sb.number_input(
-                "Año",
-                min_value=2015,
-                max_value=today.year + 1,
-                value=today.year,
-                step=1,
-                key="bitrix_y_year",
-                persist_state="session",
-            )
-        )
-        start, end = periods.year_bounds(year)
-    else:
-        start = sb.date_input(
-            "Desde",
-            value=today.replace(day=1),
-            key="bitrix_range_start",
-            format="DD/MM/YYYY",
-            persist_state="session",
-        )
-        end = sb.date_input(
-            "Hasta",
-            value=today,
-            key="bitrix_range_end",
-            format="DD/MM/YYYY",
-            persist_state="session",
-        )
-        if start > end:
-            sb.error("'Desde' no puede ser posterior a 'Hasta'.")
-            return None
-    if sb.button(
-        "Recargar período desde API",
-        help="Fuerza traer todos los meses del período desde Bitrix24 "
-        "(ignora snapshots). Puede tardar si el período es largo.",
-        key="bitrix_period_refresh",
-        width="stretch",
-    ):
-        st.session_state["_force_period"] = True
-        st.rerun()
-    return kind, start, end
 
 
 # ---------------------------------------------------------------------------
@@ -697,22 +593,19 @@ def _load(kind: str, start, end, p_start, p_end):
 # Página
 # ---------------------------------------------------------------------------
 def render() -> None:
-    sel = _period_filter(st.session_state["_months_bot"])
-    if sel is None:
+    period = period_filter(st.session_state["_months_bot"], reload_button=True)
+    if period is None:
         ui.page_header("Negocios Bitrix24")
         st.info("Elegí un rango válido en la barra lateral.")
         return
-    kind, start, end = sel
-    p_start, p_end = periods.previous_period(start, end, kind)
+    kind, start, end = period.kind, period.start, period.end
+    p_start, p_end = period.previous.start, period.previous.end
     label = periods.range_label(start, end)
-    prev_label = periods.period_label(p_start, p_end, kind)
-    prev_short = periods.period_label(p_start, p_end, kind, short=True)
+    prev_short = period.previous.label(short=True)
 
     ui.page_header(
         "Negocios Bitrix24",
-        f"Negocios de venta de máquinas creados en el período · "
-        f"{periods.period_label(start, end, kind)} comparado con "
-        f"{prev_label[0].lower() + prev_label[1:] if kind == 'Mes' else prev_label}",
+        f"Negocios de venta de máquinas creados en el período · {period_vs(period)}",
     )
 
     with st.spinner("Cargando negocios de Bitrix…"):

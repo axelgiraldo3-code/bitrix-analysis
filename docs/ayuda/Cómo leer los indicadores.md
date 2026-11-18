@@ -1,10 +1,10 @@
 ## Indicadores
 
-Cada página empieza con una fila de indicadores. Cada uno muestra el valor del período elegido, la diferencia con el período anterior y una pequeña línea con la evolución de los últimos meses.
+Cada página empieza con una fila de indicadores. Cada uno muestra el valor del período elegido, la diferencia con el período anterior y una pequeña línea con la evolución de los últimos meses (sólo con el período Mes).
 
 ### Comparación con el período anterior
 
-En Reporte mensual, la comparación es siempre con el mes anterior. En Negocios Bitrix24 se compara con el período anterior de igual duración: un trimestre con el trimestre previo, un año con el año previo y un rango de fechas con la misma cantidad de días inmediatamente anteriores. Debajo de la diferencia se indica el período de comparación, por ejemplo "vs. sep-26".
+Se compara con el período anterior de igual duración: un mes con el mes previo, un trimestre con el trimestre previo, un año con el año previo y un rango de fechas con la misma cantidad de días inmediatamente anteriores. Debajo de la diferencia se indica el período de comparación, por ejemplo "vs. sep-26".
 
 Si no hay información del período anterior, aparece la leyenda "sin datos del período anterior", que no equivale a cero.
 

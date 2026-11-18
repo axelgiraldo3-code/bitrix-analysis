@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import calendar
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 
@@ -124,4 +124,23 @@ def weekday_counts(
     for day, c in zip(days, counts):
         totals[day.weekday()] += c
         n_days[day.weekday()] += 1
+    return totals, n_days
+
+
+def weekday_counts_between(
+    dts: pd.Series, start: date, end: date, today: date | None = None
+) -> tuple[list[int], list[int]]:
+    """Como ``weekday_counts`` pero para cualquier período [start, end]: la
+    cantidad de días de cada día de la semana llega hasta hoy si el período
+    todavía no terminó."""
+    last = min(end, today or datetime.now().date())
+    d = _as_datetime(dts).dropna().dt.date
+    d = d[(d >= start) & (d <= end)]
+    totals, n_days = [0] * 7, [0] * 7
+    for day, c in d.value_counts().items():
+        totals[day.weekday()] += int(c)
+    day = start
+    while day <= last:
+        n_days[day.weekday()] += 1
+        day += timedelta(days=1)
     return totals, n_days

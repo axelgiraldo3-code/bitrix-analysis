@@ -396,25 +396,81 @@ def bot_history(
     Sheets. Sólo se leen, no se sincronizan."""
     months = [periods.shift_months(year_month, -i) for i in range(n - 1, -1, -1)]
     known = {year_month: current, periods.shift_months(year_month, -1): prev}
-    older = [
-        m for m in months if m not in known and not cache.filter_by_year_month(bot_raw, m).empty
-    ]
-    out = dict(known)
-    if older:
-        lookup, deal_lookup = lookups(year_month)
+    out = read_months(bot_raw, months, year_month, known=known)
+    return [(m, out[m]) for m in months]
+
+
+def read_months(
+    bot_raw: pd.DataFrame,
+    months: list[str],
+    anchor: str,
+    known: dict[str, pd.DataFrame | None] | None = None,
+) -> dict[str, pd.DataFrame | None]:
+    """{mes: consultas procesadas o None si no tiene reportes} para ``months``.
+
+    Los de ``known`` ya vienen procesados; el resto se procesa acá con sus
+    clasificaciones guardadas, leídas en un solo pedido a Sheets (``anchor``:
+    mes de los negocios para los nombres de Bitrix). Sólo se leen, no se
+    sincronizan."""
+    out = dict(known or {})
+    todo = [m for m in months if m not in out and not cache.filter_by_year_month(bot_raw, m).empty]
+    if todo:
+        lookup, deal_lookup = lookups(anchor)
         ignored = load_ignored()
         try:
-            tabs = sheets.read_months_batch(tuple(older), "Bot")
+            tabs = sheets.read_months_batch(tuple(todo), "Bot")
         except Exception as e:
             st.warning(f"No se pudieron leer las clasificaciones de meses anteriores: {e}")
             tabs = {}
-        for m in older:
+        for m in todo:
             month_bot = cache.filter_by_year_month(bot_raw, m)
             df = process_month(month_bot, lookup, frozenset(ignored))
             df = apply_persisted(df, m, tabs.get(m, pd.DataFrame(columns=sheets.BOT_HEADERS)))
             df["Area"] = df["Area de interes"].map(cache.area_bucket)
-            out[m] = df
-    return [(m, out.get(m)) for m in months]
+            out[m] = cache.attach_deal_names(df, deal_lookup)
+    return {m: out.get(m) for m in months}
+
+
+def _clip(frames: list[pd.DataFrame | None], start, end) -> pd.DataFrame | None:
+    """Une los meses y deja sólo las consultas entre ``start`` y ``end``
+    (inclusive; recorta los meses de borde de un rango personalizado).
+    ``None`` si ningún mes tiene reportes."""
+    frames = [f for f in frames if f is not None]
+    if not frames:
+        return None
+    df = pd.concat(frames, ignore_index=True)
+    day = pd.to_datetime(df["_dt"], errors="coerce").dt.date
+    return df[(day >= start) & (day <= end)].reset_index(drop=True)
+
+
+def period_data(bot_raw: pd.DataFrame, period: periods.Period) -> pd.DataFrame:
+    """Consultas del período (sin el anterior). En "Mes" es ``current_month``."""
+    if period.is_month:
+        return current_month(bot_raw, period.year_month)
+    by_month = read_months(bot_raw, period.months, period.last_month)
+    df = _clip([by_month[m] for m in period.months], period.start, period.end)
+    return df if df is not None else pd.DataFrame(columns=[*bot_raw.columns, "Area", "Negocio"])
+
+
+def period_with_previous(
+    bot_raw: pd.DataFrame, period: periods.Period
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """(consultas del período, del período anterior o None si no tiene
+    reportes). En "Mes" es ``month_with_previous`` (el mes visto se
+    sincroniza); en los demás períodos todos los meses se leen en un solo
+    pedido y no se sincronizan."""
+    if period.is_month:
+        return month_with_previous(bot_raw, period.year_month)
+    prev = period.previous
+    months = list(dict.fromkeys(prev.months + period.months))
+    by_month = read_months(bot_raw, months, period.last_month)
+    current = _clip([by_month[m] for m in period.months], period.start, period.end)
+    previous = _clip([by_month[m] for m in prev.months], prev.start, prev.end)
+    if current is None:  # las páginas muestran "Sin datos" con el df vacío
+        current = pd.DataFrame(columns=[*bot_raw.columns, "Area", "Negocio"])
+    if previous is not None and previous.empty:
+        previous = None
+    return current, previous
 
 
 # -----------------------------------------------------------------------------

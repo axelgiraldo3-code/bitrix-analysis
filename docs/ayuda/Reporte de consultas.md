@@ -1,10 +1,10 @@
-Resume las consultas que llegaron por WhatsApp en el mes elegido y permite evaluar si corresponden al público que Cotear busca.
+Resume las consultas que llegaron por WhatsApp en el período elegido (mes, trimestre, semestre, año o rango de fechas) y permite evaluar si corresponden al público que Cotear busca.
 
 ## Indicadores
 
 | Indicador | Qué muestra |
 |---|---|
-| Consultas del mes | Personas distintas que consultaron en el mes. |
+| Consultas del mes (o del período) | Personas distintas que consultaron en el período; quien consultó en dos meses distintos cuenta una vez por mes. |
 | Provincia con más consultas | Provincia con más consultas, sin contar las del extranjero ni las no identificadas. |
 | Área de interés principal | Área a la que el asistente derivó más consultas. |
 | Sin interés real | Porcentaje de consultas SIN RESPUESTAS o SIN INTERES. Una baja es una mejora. |
@@ -17,7 +17,7 @@ Un aumento en la cantidad de consultas no implica que sean mejores. Por eso conv
 
 Cantidad de consultas de cada [[Origen de los datos#Clasificación interna|clasificación interna]], en barras o en torta. Muestra qué parte del total se convirtió en una oportunidad (negocio, venta de repuestos o servicio técnico) y qué parte no tuvo interés real.
 
-Mientras queden muchas consultas SIN CLASIFICAR, el gráfico no refleja la situación real del mes.
+Mientras queden muchas consultas SIN CLASIFICAR, el gráfico no refleja la situación real del período.
 
 ### Por área de interés
 
@@ -37,7 +37,7 @@ Al hacer clic en una provincia se ve su distribución por localidad: el mapa se 
 
 ### Por día de la semana
 
-Total de consultas del mes según el día de la semana. En la tabla, la columna "Promedio por día" divide ese total por la cantidad de veces que el día aparece en el mes, para que un mes con cinco lunes no exagere los lunes. En el mes en curso se cuentan los días transcurridos hasta hoy.
+Total de consultas del período según el día de la semana. En la tabla, la columna "Promedio por día" divide ese total por la cantidad de veces que el día aparece en el período, para que un mes con cinco lunes no exagere los lunes. En un período en curso se cuentan los días transcurridos hasta hoy.
 
 ### Por día de la semana y hora
 
@@ -45,6 +45,6 @@ Cada celda representa una hora de un día de la semana; cuanto más oscura, más
 
 Este gráfico ayuda a definir horarios de publicidad y de atención, y a ver cuántas consultas llegan fuera del horario laboral.
 
-## Datos del mes
+## Datos del período
 
 La tabla desplegable al final lista cada consulta con su fecha, nombre, número, provincia, localidad, área de interés, negocio asociado en Bitrix24 (si existe) y clasificación.
