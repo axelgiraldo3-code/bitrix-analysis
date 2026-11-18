@@ -12,7 +12,7 @@ En la barra lateral, bajo "Datos", se indica si la información de Bitrix24 del 
 ## Botones de actualización
 
 - "Recargar Bitrix desde API": trae los negocios del mes elegido.
-- "Recargar período desde API" (en Negocios Bitrix24): trae los negocios de todo el período elegido.
+- "Recargar período desde API" (en Negocios Bitrix24 y Análisis preliminar): trae los negocios de todo el período elegido.
 - "Actualizar índice de teléfonos": actualiza la lista de teléfonos de Bitrix24. Sirve cuando se creó un negocio y la consulta correspondiente sigue SIN CLASIFICAR.
 - "Limpiar caché": descarta la copia guardada y vuelve a leer todo. Sirve cuando se modificó algo directamente en la planilla.
 

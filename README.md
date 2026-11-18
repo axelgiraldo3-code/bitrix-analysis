@@ -29,12 +29,12 @@ Aplicación Streamlit para analizar los reportes del bot de WhatsApp
 app.py                      Punto de entrada: estilos, datos comunes, barra lateral y navegación
 docs/ayuda/                 Notas de la Ayuda (Markdown estilo Obsidian, índice en Ayuda.md)
 views/
-  reporte.py                Página "Reporte mensual" (consultas del bot)
+  reporte.py                Página "Reporte de consultas" (consultas del bot)
   negocios.py               Página "Negocios Bitrix24"
   clasificacion.py          Página "Clasificación manual"
-  analisis.py               Página "Análisis preliminar" (embudo e informe del mes)
+  analisis.py               Página "Análisis preliminar" (embudo e informe del período)
   ayuda.py                  Página "Ayuda": muestra las notas de docs/ayuda/
-  common.py                 Filtro de mes y tarjeta de provincias (mapa + ranking)
+  common.py                 Filtros de período y de mes, tarjeta de provincias (mapa + ranking)
 utils/
   data.py                   Carga con caché (bot, Bitrix, índice) y armado del mes / período
   ui.py                     CSS y componentes: KPI, tarjeta gráfico ⇄ datos, datos crudos
@@ -45,10 +45,10 @@ utils/
   phone_ar.py               Formato '+54 9 <area> <local>', provincia y localidad (ENACOM) por código de área
   geo.py                    Conteo por provincia y localidad, mapa de provincias y de burbujas por localidad
   cache.py                  Limpieza, unificación mensual, reglas automáticas, áreas
-  informe.py                Informe del mes descargable (nota Markdown)
+  informe.py                Informe del período descargable (nota Markdown)
   machinery.py              Clasificación de maquinaria por nombre del negocio
   pending.py                Cola de clasificaciones sin sincronizar
-  periods.py                Rangos de mes / trimestre / año y período anterior
+  periods.py                Período elegido (mes / trimestre / semestre / año / rango), anterior y textos
   branding.py, styling.py   Colores Cotear y coloreo de tablas
 data/
   codigos_area_argentina.json   Código de área → provincia
@@ -64,15 +64,18 @@ tests/                      Pruebas de funciones puras (pytest)
 
 ## Páginas
 
-Navegación y filtros (mes o período) en la barra lateral; sólo se ejecuta la
-página abierta.
+Navegación y filtros en la barra lateral; sólo se ejecuta la página abierta.
+El período (mes, trimestre T1–T4, semestre S1–S2, año o rango de fechas) es el
+mismo en Reporte de consultas, Negocios Bitrix24 y Análisis preliminar y se
+conserva al cambiar de página; Clasificación manual usa sólo el mes.
 
-- **Reporte mensual**: KPIs con variación contra el mes anterior (consultas,
+- **Reporte de consultas**: KPIs con variación contra el período anterior de
+  igual duración (mini línea de 6 meses sólo con período Mes) (consultas,
   provincia y área principal, % sin interés real = sin respuestas + sin
   interés), distribución por clasificación (barras ⇄ torta), área de interés
   (barras sólidas por derivación interna ⇄ segmentadas por clasificación), mapa + ranking de provincias (clic en una
-  provincia: detalle por localidad) y datos crudos del mes.
-- **Negocios Bitrix24**: período libre (mes, trimestre, año, rango). Sólo
+  provincia: detalle por localidad), día de la semana, día × hora y datos crudos del período.
+- **Negocios Bitrix24**: mismo período compartido. Sólo
   cuenta los negocios **creados** dentro del período (con su etapa actual). Los
   KPIs se comparan con el período anterior de igual duración (mes, trimestre o
   año anterior; en un rango, los mismos días justo antes). Tipo de máquina ×
@@ -82,8 +85,10 @@ página abierta.
 - **Clasificación manual**: selección de un reporte y guardado en cola; el
   botón *Sincronizar* de la barra lateral lo escribe en Sheets.
 - **Análisis preliminar**: embudo consultas → derivadas → cotizadas → ganadas
-  y "Descargar informe (.md)": borrador del reporte de actividad del mes en
-  Markdown (estilo Obsidian) que enlaza los gráficos descargados de la app.
+  y "Descargar informe (.md)": borrador del reporte de actividad del período en
+  Markdown (estilo Obsidian) que enlaza los gráficos descargados de la app. El
+  título lleva el período y debajo un recuadro "Período analizado" lo detalla
+  (nombre, meses, fechas y, si sigue en curso, hasta qué día hay datos).
 
 ### Diseño
 

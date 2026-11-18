@@ -8,7 +8,7 @@ Esta guía explica qué muestra cada página del informe, cómo leer sus indicad
 
 ## Páginas
 
-- [[Reporte mensual]]: consultas recibidas por WhatsApp.
+- [[Reporte de consultas]]: consultas recibidas por WhatsApp.
 - [[Negocios Bitrix24]]: negocios de venta de máquinas.
 - [[Clasificación manual]]: revisión y clasificación de las consultas.
 - [[Análisis preliminar]]: gráficos en prueba.
